@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_auth/responsive.dart';
-
 import '../../components/background.dart';
-import 'components/login_form.dart';
-import 'components/login_screen_top_image.dart';
+import 'components/otp_form.dart';
+import 'components/otp_screen_top_image.dart';
 
-class LoginScreen extends StatelessWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+class OTPScreen extends StatelessWidget {
+  final String phoneNumber;
+  final String name;
+  
+  const OTPScreen({
+    Key? key,
+    required this.phoneNumber,
+    required this.name,
+  }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return const Background(
+    return Background(
       child: SingleChildScrollView(
         child: Responsive(
-          mobile: MobileLoginScreen(),
+          mobile: MobileOTPScreen(phoneNumber: phoneNumber, name: name),
           desktop: Row(
             children: [
-              Expanded(
-                child: LoginScreenTopImage(),
+              const Expanded(
+                child: OTPScreenTopImage(),
               ),
               Expanded(
                 child: Row(
@@ -25,7 +31,7 @@ class LoginScreen extends StatelessWidget {
                   children: [
                     SizedBox(
                       width: 450,
-                      child: LoginForm(),
+                      child: OTPForm(phoneNumber: phoneNumber, name: name),
                     ),
                   ],
                 ),
@@ -38,25 +44,30 @@ class LoginScreen extends StatelessWidget {
   }
 }
 
-class MobileLoginScreen extends StatelessWidget {
-  const MobileLoginScreen({
+class MobileOTPScreen extends StatelessWidget {
+  final String phoneNumber;
+  final String name;
+  
+  const MobileOTPScreen({
     Key? key,
+    required this.phoneNumber,
+    required this.name,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
+    return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
-        LoginScreenTopImage(),
+        const OTPScreenTopImage(),
         Row(
           children: [
-            Spacer(),
+            const Spacer(),
             Expanded(
               flex: 8,
-              child: LoginForm(),
+              child: OTPForm(phoneNumber: phoneNumber, name: name),
             ),
-            Spacer(),
+            const Spacer(),
           ],
         ),
       ],

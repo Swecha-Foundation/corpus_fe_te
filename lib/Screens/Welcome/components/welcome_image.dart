@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../../constants.dart';
 
@@ -13,8 +12,8 @@ class WelcomeImage extends StatelessWidget {
     return Column(
       children: [
         const Text(
-          "WELCOME TO EDU",
-          style: TextStyle(fontWeight: FontWeight.bold),
+          "A Product By Swecha",
+          style: TextStyle(fontWeight: FontWeight.bold,fontSize: 10),
         ),
         const SizedBox(height: defaultPadding * 2),
         Row(
@@ -22,8 +21,8 @@ class WelcomeImage extends StatelessWidget {
             const Spacer(),
             Expanded(
               flex: 8,
-              child: SvgPicture.asset(
-                "assets/icons/chat.svg",
+              child: Image.asset(
+                "assets/icons/swecha_logo.png",
               ),
             ),
             const Spacer(),

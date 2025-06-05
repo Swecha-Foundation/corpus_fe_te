@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../feedback/feedback_screen.dart';
+import '../../profile/profile_screen.dart';
 import '../../../constants.dart';
 
 class DashboardDrawer extends StatefulWidget {
@@ -28,14 +30,6 @@ class _DashboardDrawerState extends State<DashboardDrawer>
       id: 'dashboard',
       gradient: const LinearGradient(
         colors: [Color(0xFF667eea), Color(0xFF764ba2)],
-      ),
-    ),
-    DrawerMenuItem(
-      icon: Icons.mic_rounded,
-      title: 'Recordings',
-      id: 'recordings',
-      gradient: const LinearGradient(
-        colors: [Color(0xFF4facfe), Color(0xFF00f2fe)],
       ),
     ),
     DrawerMenuItem(
@@ -81,10 +75,36 @@ class _DashboardDrawerState extends State<DashboardDrawer>
     super.dispose();
   }
 
-  void _navigateToScreen(BuildContext context, String screenName) {
+  void _navigateToScreen(BuildContext context, String screenId) {
     Navigator.pop(context); // Close drawer first
     
-    // Show enhanced navigation feedback
+    // Navigate to specific screens
+    switch (screenId) {
+      case 'feedback':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const FeedbackScreen(),
+          ),
+        );
+        break;
+      case 'profile':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProfileScreen(
+              userName: widget.userName,
+              phoneNumber: widget.phoneNumber,
+            ),
+          ),
+        );
+        break;
+      default:
+        _showComingSoonSnackBar(context, screenId);
+    }
+  }
+
+  void _showComingSoonSnackBar(BuildContext context, String screenName) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -93,7 +113,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
                 // ignore: deprecated_member_use
-                color: Colors.white,
+                color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
@@ -104,7 +124,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
             ),
             const SizedBox(width: 12),
             Text(
-              'Opening $screenName...',
+              '$screenName - Coming Soon!',
               style: const TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
@@ -193,7 +213,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             // ignore: deprecated_member_use
-                            color: Colors.white,
+                            color: Colors.white.withOpacity(0.2),
                             borderRadius: BorderRadius.circular(16),
                           ),
                           child: const Icon(
@@ -217,7 +237,8 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                           icon: Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              // ignore: deprecated_member_use
+                              color: Colors.white.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: const Icon(
@@ -234,7 +255,8 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        // ignore: deprecated_member_use
+                        color: Colors.white.withOpacity(0.2),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: const Text(
@@ -299,7 +321,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                               child: _buildEnhancedMenuItem(
                                 context,
                                 menuItems[index],
-                                index == 0, // Dashboard is active by default
+                                selectedMenuItem == menuItems[index].id,
                               ),
                             ),
                           ),
@@ -374,7 +396,8 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                                     begin: Alignment.topCenter,
                                     end: Alignment.bottomCenter,
                                     colors: [
-                                      Colors.white,
+                                      // ignore: deprecated_member_use
+                                      Colors.white.withOpacity(0.2),
                                       // ignore: deprecated_member_use
                                       Colors.white.withOpacity(0.0),
                                     ],
@@ -559,7 +582,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
         if (item.id == 'dashboard') {
           Navigator.pop(context);
         } else {
-          _navigateToScreen(context, item.title);
+          _navigateToScreen(context, item.id);
         }
       },
       child: AnimatedContainer(
@@ -622,7 +645,8 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                         colors: [
-                          Colors.white,
+                          // ignore: deprecated_member_use
+                          Colors.white.withOpacity(0.2),
                           // ignore: deprecated_member_use
                           Colors.white.withOpacity(0.0),
                         ],
@@ -656,7 +680,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                 ),
                 child: const Icon(
                   Icons.arrow_forward_ios_rounded,
-                  color: kPrimaryColor,
+                  color: Colors.white,
                   size: 12,
                 ),
               ),

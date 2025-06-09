@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../constants.dart';
+import '../Welcome/welcome_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String userName;
@@ -42,12 +43,18 @@ class _ProfileScreenState extends State<ProfileScreen>
       vsync: this,
     );
     
-    _fadeController.forward();
-    _slideController.forward();
+    // Add a small delay before starting animations to ensure widget is mounted
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _fadeController.forward();
+        _slideController.forward();
+      }
+    });
   }
 
   @override
   void dispose() {
+    // Properly dispose animation controllers
     _fadeController.dispose();
     _slideController.dispose();
     super.dispose();
@@ -171,7 +178,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
   Widget _buildProfileHeaderCard() {
     return AnimatedBuilder(
-      animation: _fadeController,
+      animation: Listenable.merge([_fadeController, _slideController]),
       builder: (context, child) {
         return FadeTransition(
           opacity: _fadeController,
@@ -428,9 +435,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                   trailing: Switch(
                     value: notificationsEnabled,
                     onChanged: (value) {
-                      setState(() {
-                        notificationsEnabled = value;
-                      });
+                      if (mounted) {
+                        setState(() {
+                          notificationsEnabled = value;
+                        });
+                      }
                     },
                     activeColor: kPrimaryColor,
                   ),
@@ -443,9 +452,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                   trailing: Switch(
                     value: darkModeEnabled,
                     onChanged: (value) {
-                      setState(() {
-                        darkModeEnabled = value;
-                      });
+                      if (mounted) {
+                        setState(() {
+                          darkModeEnabled = value;
+                        });
+                      }
                     },
                     activeColor: kPrimaryColor,
                   ),
@@ -458,9 +469,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                   trailing: Switch(
                     value: biometricEnabled,
                     onChanged: (value) {
-                      setState(() {
-                        biometricEnabled = value;
-                      });
+                      if (mounted) {
+                        setState(() {
+                          biometricEnabled = value;
+                        });
+                      }
                     },
                     activeColor: kPrimaryColor,
                   ),
@@ -586,11 +599,11 @@ class _ProfileScreenState extends State<ProfileScreen>
                   onTap: () => _showBackupDialog(),
                 ),
                 _buildActionTile(
-                  icon: Icons.delete_outline_rounded,
-                  title: 'Delete Account',
-                  subtitle: 'Permanently delete account',
-                  color: Colors.red,
-                  onTap: () => _showDeleteAccountDialog(),
+                  icon: Icons.logout_rounded,
+                  title: 'Logout',
+                  subtitle: 'Sign out from your account',
+                  color: Colors.orange,
+                  onTap: () => _showLogoutDialog(),
                 ),
               ],
             ),
@@ -723,14 +736,16 @@ class _ProfileScreenState extends State<ProfileScreen>
   Widget _buildInfoButton(String title, IconData icon) {
     return GestureDetector(
       onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Opening $title...'),
-            backgroundColor: kPrimaryColor,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Opening $title...'),
+              backgroundColor: kPrimaryColor,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
       },
       child: Column(
         children: [
@@ -779,7 +794,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   color: kPrimaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.edit_rounded,
                   color: kPrimaryColor,
                   size: 20,
@@ -799,7 +814,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: kPrimaryColor),
+                    borderSide: const BorderSide(color: kPrimaryColor),
                   ),
                 ),
               ),
@@ -811,7 +826,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(color: kPrimaryColor),
+                    borderSide: const BorderSide(color: kPrimaryColor),
                   ),
                 ),
               ),
@@ -824,19 +839,23 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             ElevatedButton(
               onPressed: () {
-                setState(() {
-                  displayName = nameController.text;
-                  email = emailController.text;
-                });
+                if (mounted) {
+                  setState(() {
+                    displayName = nameController.text;
+                    email = emailController.text;
+                  });
+                }
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Text('Profile updated successfully!'),
-                    backgroundColor: kPrimaryColor,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('Profile updated successfully!'),
+                      backgroundColor: kPrimaryColor,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                }
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: kPrimaryColor,
@@ -863,7 +882,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: kPrimaryColor)),
+              child: const Text('OK', style: TextStyle(color: kPrimaryColor)),
             ),
           ],
         );
@@ -883,7 +902,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: kPrimaryColor)),
+              child: const Text('OK', style: TextStyle(color: kPrimaryColor)),
             ),
           ],
         );
@@ -903,7 +922,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: kPrimaryColor)),
+              child: const Text('OK', style: TextStyle(color: kPrimaryColor)),
             ),
           ],
         );
@@ -923,7 +942,7 @@ class _ProfileScreenState extends State<ProfileScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('OK', style: TextStyle(color: kPrimaryColor)),
+              child: const Text('OK', style: TextStyle(color: kPrimaryColor)),
             ),
           ],
         );
@@ -931,7 +950,7 @@ class _ProfileScreenState extends State<ProfileScreen>
     );
   }
 
-  void _showDeleteAccountDialog() {
+  void _showLogoutDialog() {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -943,21 +962,21 @@ class _ProfileScreenState extends State<ProfileScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
+                  color: Colors.orange.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(
-                  Icons.warning_rounded,
-                  color: Colors.red,
+                  Icons.logout_rounded,
+                  color: Colors.orange,
                   size: 20,
                 ),
               ),
               const SizedBox(width: 12),
-              const Text('Delete Account'),
+              const Text('Logout'),
             ],
           ),
           content: const Text(
-            'This action cannot be undone. All your data will be permanently deleted.',
+            'Are you sure you want to logout from your account?',
             style: TextStyle(fontSize: 16),
           ),
           actions: [
@@ -967,21 +986,23 @@ class _ProfileScreenState extends State<ProfileScreen>
             ),
             ElevatedButton(
               onPressed: () {
+                // Close the dialog first
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Account deletion cancelled'),
-                    backgroundColor: Colors.red,
-                    behavior: SnackBarBehavior.floating,
+                
+                // Navigate back to welcome screen and clear all previous routes
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(
+                    builder: (context) => const WelcomeScreen(),
                   ),
+                  (Route<dynamic> route) => false,
                 );
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
+                backgroundColor: Colors.orange,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              child: const Text('Delete'),
+              child: const Text('Logout'),
             ),
           ],
         );

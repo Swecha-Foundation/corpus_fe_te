@@ -3,7 +3,14 @@ import 'package:flutter/material.dart';
 import '../../../constants.dart';
 
 class CategoryGrid extends StatefulWidget {
-  const CategoryGrid({Key? key}) : super(key: key);
+  final String? selectedCategory;
+  final Function(String?)? onCategorySelected;
+  
+  const CategoryGrid({
+    Key? key,
+    this.selectedCategory,
+    this.onCategorySelected,
+  }) : super(key: key);
 
   @override
   State<CategoryGrid> createState() => _CategoryGridState();
@@ -12,7 +19,6 @@ class CategoryGrid extends StatefulWidget {
 class _CategoryGridState extends State<CategoryGrid> 
     with TickerProviderStateMixin {
   late AnimationController _animationController;
-  String? selectedCategory;
 
   @override
   void initState() {
@@ -92,7 +98,7 @@ class _CategoryGridState extends State<CategoryGrid>
                 ),
               ),
               const Spacer(),
-              if (selectedCategory != null)
+              if (widget.selectedCategory != null)
                 AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -101,7 +107,7 @@ class _CategoryGridState extends State<CategoryGrid>
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    selectedCategory!,
+                    widget.selectedCategory!,
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -180,13 +186,17 @@ class _CategoryGridState extends State<CategoryGrid>
   }
 
   Widget _buildCategoryTile(BuildContext context, CategoryItem category) {
-    final isSelected = selectedCategory == category.title;
+    final isSelected = widget.selectedCategory == category.title;
     
     return GestureDetector(
       onTap: () {
-        setState(() {
-          selectedCategory = isSelected ? null : category.title;
-        });
+        // Toggle selection: if already selected, deselect; otherwise, select
+        final newSelection = isSelected ? null : category.title;
+        
+        // Call the parent callback to update the state
+        if (widget.onCategorySelected != null) {
+          widget.onCategorySelected!(newSelection);
+        }
         
         // Add haptic feedback
         // HapticFeedback.lightImpact();
@@ -197,7 +207,7 @@ class _CategoryGridState extends State<CategoryGrid>
               children: [
                 Text(category.icon, style: const TextStyle(fontSize: 20)),
                 const SizedBox(width: 8),
-                Text('Selected: ${category.title}'),
+                Text(isSelected ? 'Deselected: ${category.title}' : 'Selected: ${category.title}'),
               ],
             ),
             backgroundColor: kPrimaryColor,

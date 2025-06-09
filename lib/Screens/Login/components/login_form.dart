@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../components/already_have_an_account_acheck.dart';
 import '../../../constants.dart';
+import '../../../services/otp_api_service.dart'; // Add this import
 import '../../Signup/signup_screen.dart';
 import '../../OTP/otp_screen.dart';
 
@@ -19,6 +20,7 @@ class _LoginFormState extends State<LoginForm> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -27,43 +29,59 @@ class _LoginFormState extends State<LoginForm> {
     super.dispose();
   }
 
-  void _handleLogin() {
-    // ignore: avoid_print
-    print("Login button pressed!"); // Debug print
-    
+  void _handleLogin() async {
     if (_formKey.currentState!.validate()) {
-      // Get the entered values
+      setState(() {
+        _isLoading = true;
+      });
+
       String name = _nameController.text.trim();
       String phoneNumber = _phoneController.text.trim();
       
-      // ignore: avoid_print
-      print("Form validated successfully!"); // Debug print
-      // ignore: avoid_print
-      print("Name: $name, Phone: $phoneNumber"); // Debug print
-      
       try {
-        // Navigate to OTP screen with the collected data
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => OTPScreen(
-              phoneNumber: phoneNumber,
-              name: name,
-            ),
-          ),
-        ).then((value) {
-          // ignore: avoid_print
-          print("Navigation completed"); // Debug print
-        });
-        // ignore: avoid_print
-        print("Navigation initiated"); // Debug print
+        // Send OTP API call
+        final result = await OTPApiService.sendOTP(phoneNumber);
+        
+        if (result['success']) {
+          // Navigate to OTP screen if API call successful
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => OTPScreen(
+                  phoneNumber: phoneNumber,
+                  name: name,
+                ),
+              ),
+            );
+          }
+        } else {
+          // Show error message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(result['message']),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       } catch (e) {
-        // ignore: avoid_print
-        print("Navigation error: $e"); // Debug print
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
-    } else {
-      // ignore: avoid_print
-      print("Form validation failed!"); // Debug print
     }
   }
 
@@ -73,6 +91,28 @@ class _LoginFormState extends State<LoginForm> {
       key: _formKey,
       child: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: defaultPadding),
+            child: TextFormField(
+              controller: _nameController,
+              keyboardType: TextInputType.name,
+              textInputAction: TextInputAction.next,
+              cursorColor: kPrimaryColor,
+              validator: (value) {
+                if (value == null || value.trim().isEmpty) {
+                  return 'Please enter your name';
+                }
+                return null;
+              },
+              decoration: const InputDecoration(
+                hintText: "Enter your name",
+                prefixIcon: Padding(
+                  padding: EdgeInsets.all(defaultPadding),
+                  child: Icon(Icons.person),
+                ),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(vertical: defaultPadding),
             child: TextFormField(
@@ -100,16 +140,23 @@ class _LoginFormState extends State<LoginForm> {
                   padding: EdgeInsets.all(defaultPadding),
                   child: Icon(Icons.phone),
                 ),
-                counterText: '', // Hides the character counter
+                counterText: '',
               ),
             ),
           ),
           const SizedBox(height: defaultPadding),
           ElevatedButton(
-            onPressed: _handleLogin,
-            child: Text(
-              "Login".toUpperCase(),
-            ),
+            onPressed: _isLoading ? null : _handleLogin,
+            child: _isLoading
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text("Login".toUpperCase()),
           ),
           const SizedBox(height: defaultPadding),
           AlreadyHaveAnAccountCheck(

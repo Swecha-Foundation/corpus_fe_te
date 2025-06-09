@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../../components/already_have_an_account_acheck.dart';
 import '../../../constants.dart';
+import '../../../services/otp_api_service.dart'; // Add this import
 import '../../Login/login_screen.dart';
 import '../../OTP/otp_screen.dart';
 
@@ -18,6 +19,7 @@ class SignUpForm extends StatefulWidget {
 class _SignUpFormState extends State<SignUpForm> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -25,42 +27,58 @@ class _SignUpFormState extends State<SignUpForm> {
     super.dispose();
   }
 
-  void _handleGetOTP() {
-    // ignore: avoid_print
-    print("Get OTP button pressed!"); // Debug print
-    
+  void _handleGetOTP() async {
     if (_formKey.currentState!.validate()) {
-      // Get the phone number
+      setState(() {
+        _isLoading = true;
+      });
+
       String phoneNumber = _phoneController.text.trim();
       
-      // ignore: avoid_print
-      print("Form validated successfully!"); // Debug print
-      // ignore: avoid_print
-      print("Phone: $phoneNumber"); // Debug print
-      
       try {
-        // Navigate to OTP screen with phone number
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => OTPScreen(
-              phoneNumber: phoneNumber,
-              name: "New User", // Default name for signup flow
-            ),
-          ),
-        ).then((value) {
-          // ignore: avoid_print
-          print("Navigation completed"); // Debug print
-        });
-        // ignore: avoid_print
-        print("Navigation initiated"); // Debug print
+        // Send OTP API call
+        final result = await OTPApiService.sendOTP(phoneNumber);
+        
+        if (result['success']) {
+          // Navigate to OTP screen if API call successful
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => OTPScreen(
+                  phoneNumber: phoneNumber,
+                  name: "New User", // Default name for signup flow
+                ),
+              ),
+            );
+          }
+        } else {
+          // Show error message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(result['message']),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       } catch (e) {
-        // ignore: avoid_print
-        print("Navigation error: $e"); // Debug print
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
-    } else {
-      // ignore: avoid_print
-      print("Form validation failed!"); // Debug print
     }
   }
 
@@ -97,14 +115,23 @@ class _SignUpFormState extends State<SignUpForm> {
                   padding: EdgeInsets.all(defaultPadding),
                   child: Icon(Icons.phone),
                 ),
-                counterText: '', // Hides the character counter
+                counterText: '',
               ),
             ),
           ),
           const SizedBox(height: defaultPadding / 2),
           ElevatedButton(
-            onPressed: _handleGetOTP,
-            child: Text("Get OTP".toUpperCase()),
+            onPressed: _isLoading ? null : _handleGetOTP,
+            child: _isLoading
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text("Get OTP".toUpperCase()),
           ),
           const SizedBox(height: defaultPadding),
           AlreadyHaveAnAccountCheck(

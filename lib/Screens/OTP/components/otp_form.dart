@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
 import '../../../constants.dart';
+import '../../../services/otp_api_service.dart';
 import '../../Dashboard/dashboard_screen.dart';
 
 class OTPForm extends StatefulWidget {
@@ -20,6 +22,18 @@ class OTPForm extends StatefulWidget {
 class _OTPFormState extends State<OTPForm> {
   final List<TextEditingController> _controllers = List.generate(6, (index) => TextEditingController());
   final List<FocusNode> _focusNodes = List.generate(6, (index) => FocusNode());
+  bool _isVerifying = false;
+  bool _isResending = false;
+  
+  // Countdown timer for resend button
+  Timer? _resendTimer;
+  int _resendCountdown = 0;
+  
+  @override
+  void initState() {
+    super.initState();
+    _startResendCountdown();
+  }
   
   @override
   void dispose() {
@@ -29,7 +43,24 @@ class _OTPFormState extends State<OTPForm> {
     for (var focusNode in _focusNodes) {
       focusNode.dispose();
     }
+    _resendTimer?.cancel();
     super.dispose();
+  }
+  
+  void _startResendCountdown() {
+    setState(() {
+      _resendCountdown = 60; // 60 seconds countdown
+    });
+    
+    _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_resendCountdown > 0) {
+        setState(() {
+          _resendCountdown--;
+        });
+      } else {
+        timer.cancel();
+      }
+    });
   }
   
   void _onOTPChanged(String value, int index) {
@@ -42,7 +73,6 @@ class _OTPFormState extends State<OTPForm> {
     }
   }
   
-  // ignore: unused_element
   void _onBackspacePressed(int index) {
     if (index > 0 && _controllers[index].text.isEmpty) {
       FocusScope.of(context).requestFocus(_focusNodes[index - 1]);
@@ -57,48 +87,122 @@ class _OTPFormState extends State<OTPForm> {
     return _getOTPCode().length == 6;
   }
   
-  void _verifyOTP() {
-  if (_isOTPComplete()) {
-    String otpCode = _getOTPCode();
-    // Here you would typically validate the OTP with your backend
-    // ignore: avoid_print
-    print('Verifying OTP: $otpCode for ${widget.name} (${widget.phoneNumber})');
-    
-    // Navigate to Dashboard after successful OTP verification
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DashboardScreen(
-          userName: widget.name,
-          phoneNumber: widget.phoneNumber,
+  void _verifyOTP() async {
+    if (_isOTPComplete()) {
+      setState(() {
+        _isVerifying = true;
+      });
+
+      String otpCode = _getOTPCode();
+      
+      try {
+        // Verify OTP API call
+        final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
+        
+        if (result['success']) {
+          // Navigate to Dashboard after successful OTP verification
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => DashboardScreen(
+                  userName: widget.name,
+                  phoneNumber: widget.phoneNumber,
+                ),
+              ),
+            );
+          }
+        } else {
+          // Show error message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(result['message']),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isVerifying = false;
+          });
+        }
+      }
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter complete OTP'),
+          backgroundColor: Colors.red,
         ),
-      ),
-    );
-  } else {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Please enter complete OTP'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-}
-  
-  void _resendOTP() {
-    // Clear all fields
-    for (var controller in _controllers) {
-      controller.clear();
+      );
     }
-    // Focus on first field
-    FocusScope.of(context).requestFocus(_focusNodes[0]);
-    
-    // Here you would typically trigger OTP resend API call
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('OTP sent to ${widget.phoneNumber}'),
-        backgroundColor: kPrimaryColor,
-      ),
-    );
+  }
+  
+  void _resendOTP() async {
+    setState(() {
+      _isResending = true;
+    });
+
+    try {
+      // Resend OTP API call
+      final result = await OTPApiService.resendOTP(widget.phoneNumber);
+      
+      if (result['success']) {
+        // Clear all fields
+        for (var controller in _controllers) {
+          controller.clear();
+        }
+        // Focus on first field
+        FocusScope.of(context).requestFocus(_focusNodes[0]);
+        
+        // Restart countdown
+        _startResendCountdown();
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message']),
+              backgroundColor: kPrimaryColor,
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message']),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isResending = false;
+        });
+      }
+    }
   }
 
   @override
@@ -163,7 +267,6 @@ class _OTPFormState extends State<OTPForm> {
                   ],
                   onChanged: (value) => _onOTPChanged(value, index),
                   onTap: () {
-                    // Clear the field when tapped for better UX
                     _controllers[index].selection = TextSelection.fromPosition(
                       TextPosition(offset: _controllers[index].text.length),
                     );
@@ -182,30 +285,50 @@ class _OTPFormState extends State<OTPForm> {
           
           // Verify Button
           ElevatedButton(
-            onPressed: _isOTPComplete() ? _verifyOTP : null,
+            onPressed: (_isOTPComplete() && !_isVerifying) ? _verifyOTP : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _isOTPComplete() ? kPrimaryColor : Colors.grey,
+              backgroundColor: (_isOTPComplete() && !_isVerifying) ? kPrimaryColor : Colors.grey,
             ),
-            child: const Text(
-              "VERIFY OTP",
-              style: TextStyle(
-                color: Colors.white,
-              ),
-            ),
+            child: _isVerifying
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : const Text(
+                    "VERIFY OTP",
+                    style: TextStyle(
+                      color: Colors.white,
+                    ),
+                  ),
           ),
           
           const SizedBox(height: defaultPadding),
           
-          // Resend OTP
+          // Resend OTP with countdown
           TextButton(
-            onPressed: _resendOTP,
-            child: const Text(
-              "Didn't receive OTP? Resend",
-              style: TextStyle(
-                color: kPrimaryColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            onPressed: (_resendCountdown == 0 && !_isResending) ? _resendOTP : null,
+            child: _isResending
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(kPrimaryColor),
+                    ),
+                  )
+                : Text(
+                    _resendCountdown > 0 
+                        ? "Resend OTP in ${_resendCountdown}s"
+                        : "Didn't receive OTP? Resend",
+                    style: TextStyle(
+                      color: _resendCountdown > 0 ? Colors.grey : kPrimaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
           ),
           
           const SizedBox(height: defaultPadding),

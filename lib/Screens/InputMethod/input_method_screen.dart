@@ -1,5 +1,6 @@
 // Screens/InputMethod/input_method_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_auth/Screens/recording/picture_input_screen.dart';
 import '../../constants.dart';
 import '../recording/text_input_screen.dart';
 import '../recording/audio_input_screen.dart';
@@ -7,7 +8,7 @@ import 'components/input_options_grid.dart';
 
 class InputMethodScreen extends StatefulWidget {
   final String selectedCategory;
-  
+
   const InputMethodScreen({
     Key? key,
     required this.selectedCategory,
@@ -17,7 +18,7 @@ class InputMethodScreen extends StatefulWidget {
   State<InputMethodScreen> createState() => _InputMethodScreenState();
 }
 
-class _InputMethodScreenState extends State<InputMethodScreen> 
+class _InputMethodScreenState extends State<InputMethodScreen>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -30,7 +31,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       duration: const Duration(milliseconds: 800),
       vsync: this,
     );
-    
+
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -38,7 +39,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       parent: _animationController,
       curve: Curves.easeOut,
     ));
-    
+
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.3),
       end: Offset.zero,
@@ -46,7 +47,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       parent: _animationController,
       curve: Curves.easeOutCubic,
     ));
-    
+
     _animationController.forward();
   }
 
@@ -60,7 +61,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => TextInputScreen(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            TextInputScreen(
           selectedCategory: widget.selectedCategory,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -83,7 +85,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => AudioInputScreen(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            AudioInputScreen(
           selectedCategory: widget.selectedCategory,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -103,11 +106,33 @@ class _InputMethodScreenState extends State<InputMethodScreen>
   }
 
   void _handleVideoInput() {
-    _showSnackBar('Opening video recording for ${widget.selectedCategory}...', Icons.videocam, const Color(0xFF9C27B0));
+    _showSnackBar('Opening video recording for ${widget.selectedCategory}...',
+        Icons.videocam, const Color(0xFF9C27B0));
   }
 
   void _handlePictureInput() {
-    _showSnackBar('Opening picture selection for ${widget.selectedCategory}...', Icons.photo, const Color(0xFFFF9800));
+    // _showSnackBar('Opening picture selection for ${widget.selectedCategory}...', Icons.photo, const Color(0xFFFF9800));
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            PictureInputScreen(
+          selectedCategory: widget.selectedCategory,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            )),
+            child: child,
+          );
+        },
+      ),
+    );
   }
 
   void _showSnackBar(String message, IconData icon, Color color) {
@@ -144,7 +169,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
                   children: [
                     // Custom App Bar
                     _buildCustomAppBar(),
-                    
+
                     // Main Content
                     Expanded(
                       child: SingleChildScrollView(
@@ -153,9 +178,9 @@ class _InputMethodScreenState extends State<InputMethodScreen>
                           children: [
                             // Category Display Section
                             _buildCategorySection(),
-                            
+
                             const SizedBox(height: 30),
-                            
+
                             // Input Options Grid
                             InputOptionsGrid(
                               onTextTap: _handleTextInput,
@@ -163,9 +188,9 @@ class _InputMethodScreenState extends State<InputMethodScreen>
                               onVideoTap: _handleVideoInput,
                               onPictureTap: _handlePictureInput,
                             ),
-                            
+
                             const SizedBox(height: 30),
-                            
+
                             // Tips Section
                             _buildTipsSection(),
                           ],

@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_auth/Screens/Welcome/welcome_screen.dart';
 import 'package:flutter_auth/constants.dart';
+import 'package:camera/camera.dart';
 
-void main() => runApp(const MyApp());
+late List<CameraDescription> cameras;
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initCameras();
+  runApp(const MyApp());
+}
 
 class MyApp extends StatelessWidget {
   const MyApp({Key? key}) : super(key: key);
@@ -40,5 +47,16 @@ class MyApp extends StatelessWidget {
           )),
       home: const WelcomeScreen(),
     );
+  }
+}
+
+Future<void> initCameras() async {
+  try {
+    cameras = await availableCameras().timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => <CameraDescription>[], // return empty list on timeout
+    );
+  } catch (e) {
+    cameras = []; // fallback on any other error
   }
 }

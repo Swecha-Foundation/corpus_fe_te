@@ -14,7 +14,7 @@ class ApiConstants {
   // API Endpoints
   static const String categoriesEndpoint = '/categories/';
   
-  // Other endpoints (add as needed)
+  
   static const String usersEndpoint = '/users/';
   static const String recordingsEndpoint = '/recordings/';
   static const String authEndpoint = '/auth/';

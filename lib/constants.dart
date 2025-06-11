@@ -19,7 +19,7 @@ class ApiConstants {
   static const String recordingsEndpoint = '/recordings/';
   static const String authEndpoint = '/auth/';
   
-  // Request timeout duration
+  
   static const Duration requestTimeout = Duration(seconds: 30);
   
   // API Version

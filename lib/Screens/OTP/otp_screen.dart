@@ -7,11 +7,15 @@ import 'components/otp_screen_top_image.dart';
 class OTPScreen extends StatelessWidget {
   final String phoneNumber;
   final String name;
+  final bool isNewUser;
+  final Map<String, dynamic>? userData;
   
   const OTPScreen({
     Key? key,
     required this.phoneNumber,
     required this.name,
+    this.isNewUser = false,
+    this.userData,
   }) : super(key: key);
 
   @override
@@ -19,7 +23,12 @@ class OTPScreen extends StatelessWidget {
     return Background(
       child: SingleChildScrollView(
         child: Responsive(
-          mobile: MobileOTPScreen(phoneNumber: phoneNumber, name: name),
+          mobile: MobileOTPScreen(
+            phoneNumber: phoneNumber, 
+            name: name,
+            isNewUser: isNewUser,
+            userData: userData,
+          ),
           desktop: Row(
             children: [
               const Expanded(
@@ -31,7 +40,12 @@ class OTPScreen extends StatelessWidget {
                   children: [
                     SizedBox(
                       width: 450,
-                      child: OTPForm(phoneNumber: phoneNumber, name: name),
+                      child: OTPForm(
+                        phoneNumber: phoneNumber, 
+                        name: name,
+                        isNewUser: isNewUser,
+                        userData: userData,
+                      ),
                     ),
                   ],
                 ),
@@ -47,11 +61,15 @@ class OTPScreen extends StatelessWidget {
 class MobileOTPScreen extends StatelessWidget {
   final String phoneNumber;
   final String name;
+  final bool isNewUser;
+  final Map<String, dynamic>? userData;
   
   const MobileOTPScreen({
     Key? key,
     required this.phoneNumber,
     required this.name,
+    this.isNewUser = false,
+    this.userData,
   }) : super(key: key);
 
   @override
@@ -65,7 +83,12 @@ class MobileOTPScreen extends StatelessWidget {
             const Spacer(),
             Expanded(
               flex: 8,
-              child: OTPForm(phoneNumber: phoneNumber, name: name),
+              child: OTPForm(
+                phoneNumber: phoneNumber, 
+                name: name,
+                isNewUser: isNewUser,
+                userData: userData,
+              ),
             ),
             const Spacer(),
           ],

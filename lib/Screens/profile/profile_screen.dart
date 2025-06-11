@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import '../../../constants.dart';
 import '../Welcome/welcome_screen.dart';
@@ -445,7 +447,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                   ),
                   color: const Color(0xFF4facfe),
                 ),
-                _buildSettingsTile(
+                /*_buildSettingsTile(
                   icon: Icons.dark_mode_rounded,
                   title: 'Dark Mode',
                   subtitle: 'Toggle dark theme',
@@ -478,7 +480,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     activeColor: kPrimaryColor,
                   ),
                   color: const Color(0xFF43e97b),
-                ),
+                ),*/
               ],
             ),
           ),
@@ -791,7 +793,6 @@ class _ProfileScreenState extends State<ProfileScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  // ignore: deprecated_member_use
                   color: kPrimaryColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),

@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import '../../../constants.dart';
 import '../../InputMethod/input_method_screen.dart';
@@ -21,7 +23,7 @@ class RecordingSection extends StatefulWidget {
 class _RecordingSectionState extends State<RecordingSection> 
     with TickerProviderStateMixin {
   late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
+  late Animation<double> _pulseAnimation; // This was declared but never initialized
   bool _hasNavigated = false; // Track navigation state
   String? _lastProcessedCategory; // Track the last category we processed for auto-navigation
 
@@ -33,6 +35,7 @@ class _RecordingSectionState extends State<RecordingSection>
       vsync: this,
     );
     
+    // FIX: Initialize the _pulseAnimation properly
     _pulseAnimation = Tween<double>(
       begin: 1.0,
       end: 1.1,
@@ -597,7 +600,6 @@ class _RecordingSectionState extends State<RecordingSection>
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            // ignore: deprecated_member_use
             color: color.withOpacity(0.1),
             borderRadius: BorderRadius.circular(16),
           ),

@@ -385,7 +385,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                             DropdownButton<String>(
                               value: _selectedLanguage,
                               underline: Container(),
-                              items: ['Telugu', 'English', 'Hindi'].map((String value) {
+                              items: ['Telugu', 'English'].map((String value) {
                                 return DropdownMenuItem<String>(
                                   value: value,
                                   child: Text(

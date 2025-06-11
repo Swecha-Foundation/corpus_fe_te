@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../constants.dart';
@@ -77,6 +79,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       vsync: this,
     );
     
+    // FIXED: Initialize the animations properly
     _appBarAnimation = CurvedAnimation(
       parent: _appBarController,
       curve: Curves.easeOutCubic,
@@ -157,6 +160,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  // ignore: unused_element
   void _adjustFontSize() {
     setState(() {
       _fontSize = _fontSize >= 1.4 ? 1.0 : _fontSize + 0.2;
@@ -272,7 +276,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                         ),
                         boxShadow: [
                           BoxShadow(
-                            // ignore: deprecated_member_use
                             color: Colors.black.withOpacity(0.08),
                             offset: const Offset(0, 8),
                             blurRadius: 20,

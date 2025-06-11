@@ -1,3 +1,5 @@
+// ignore_for_file: avoid_print
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:async';
@@ -8,7 +10,7 @@ class OTPApiService {
   // Rate limiting variables
   static DateTime? _lastSendOTPTime;
   static DateTime? _lastResendOTPTime;
-  static const int _minIntervalSeconds = 30; // 1 minute between OTP requests
+  static const int _minIntervalSeconds = 20; // 20 seconds between OTP requests
   
   // Check if enough time has passed since last OTP request
   static bool _canSendOTP() {
@@ -50,6 +52,7 @@ class OTPApiService {
       int secondsLeft = _getSecondsUntilNextOTP();
       return {
         'success': false,
+        // ignore: unnecessary_brace_in_string_interps
         'message': 'Please wait ${secondsLeft} seconds before requesting another OTP',
         'error': 'rate_limit_client_side'
       };
@@ -82,6 +85,7 @@ class OTPApiService {
         };
       } else if (response.statusCode == 429) {
         // Rate limit exceeded from server
+        // ignore: unused_local_variable
         final errorData = jsonDecode(response.body);
         return {
           'success': false,
@@ -159,6 +163,7 @@ class OTPApiService {
       int secondsLeft = _getSecondsUntilNextOTP();
       return {
         'success': false,
+        // ignore: unnecessary_brace_in_string_interps
         'message': 'Please wait ${secondsLeft} seconds before requesting another OTP',
         'error': 'rate_limit_client_side'
       };
@@ -191,6 +196,7 @@ class OTPApiService {
         };
       } else if (response.statusCode == 429) {
         // Rate limit exceeded from server
+        // ignore: unused_local_variable
         final errorData = jsonDecode(response.body);
         return {
           'success': false,

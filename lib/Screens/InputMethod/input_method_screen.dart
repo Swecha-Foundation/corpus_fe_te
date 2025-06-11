@@ -1,9 +1,13 @@
 // Screens/InputMethod/input_method_screen.dart
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
+import 'package:flutter_auth/Screens/recording/video_input_screen.dart';
 import '../../constants.dart';
 import '../recording/text_input_screen.dart';
 import '../recording/audio_input_screen.dart';
 import 'components/input_options_grid.dart';
+import '../recording/picture_input_screen.dart';
 
 class InputMethodScreen extends StatefulWidget {
   final String selectedCategory;
@@ -104,11 +108,52 @@ class _InputMethodScreenState extends State<InputMethodScreen>
 
   void _handleVideoInput() {
     _showSnackBar('Opening video recording for ${widget.selectedCategory}...', Icons.videocam, const Color(0xFF9C27B0));
+      Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => VideoInputScreen(
+          selectedCategory: widget.selectedCategory,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            )),
+            child: child,
+          );
+        },
+      ),
+    );
   }
+  
 
   void _handlePictureInput() {
-    _showSnackBar('Opening picture selection for ${widget.selectedCategory}...', Icons.photo, const Color(0xFFFF9800));
+    Navigator.push(
+      context,
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => PictureInputScreen(
+          selectedCategory: widget.selectedCategory,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).animate(CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            )),
+            child: child,
+          );
+        },
+      ),
+    );
   }
+
 
   void _showSnackBar(String message, IconData icon, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(

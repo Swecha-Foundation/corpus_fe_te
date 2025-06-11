@@ -1,18 +1,25 @@
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import '../../../constants.dart';
 import '../../../services/otp_api_service.dart';
+import '../../../services/user_api_service.dart';
 import '../../Dashboard/dashboard_screen.dart';
 
 class OTPForm extends StatefulWidget {
   final String phoneNumber;
   final String name;
+  final bool isNewUser;
+  final Map<String, dynamic>? userData;
   
   const OTPForm({
     Key? key,
     required this.phoneNumber,
     required this.name,
+    this.isNewUser = false,
+    this.userData,
   }) : super(key: key);
 
   @override
@@ -73,12 +80,6 @@ class _OTPFormState extends State<OTPForm> {
     }
   }
   
-  void _onBackspacePressed(int index) {
-    if (index > 0 && _controllers[index].text.isEmpty) {
-      FocusScope.of(context).requestFocus(_focusNodes[index - 1]);
-    }
-  }
-  
   String _getOTPCode() {
     return _controllers.map((controller) => controller.text).join();
   }
@@ -100,6 +101,14 @@ class _OTPFormState extends State<OTPForm> {
         final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
         
         if (result['success']) {
+          // Update last login for existing users
+          if (!widget.isNewUser && widget.userData != null) {
+            final userId = widget.userData!['id']?.toString();
+            if (userId != null) {
+              await UserApiService.updateLastLogin(userId);
+            }
+          }
+          
           // Navigate to Dashboard after successful OTP verification
           if (mounted) {
             Navigator.pushReplacement(
@@ -117,8 +126,12 @@ class _OTPFormState extends State<OTPForm> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(result['message']),
+                content: Text(result['message'] ?? 'OTP verification failed'),
                 backgroundColor: Colors.red,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
             );
           }
@@ -129,6 +142,10 @@ class _OTPFormState extends State<OTPForm> {
             SnackBar(
               content: Text('Error: $e'),
               backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           );
         }
@@ -141,9 +158,13 @@ class _OTPFormState extends State<OTPForm> {
       }
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter complete OTP'),
+        SnackBar(
+          content: const Text('Please enter complete OTP'),
           backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
         ),
       );
     }
@@ -156,7 +177,7 @@ class _OTPFormState extends State<OTPForm> {
 
     try {
       // Resend OTP API call
-      final result = await OTPApiService.resendOTP(widget.phoneNumber);
+      final result = await OTPApiService.sendOTP(widget.phoneNumber);
       
       if (result['success']) {
         // Clear all fields
@@ -172,8 +193,12 @@ class _OTPFormState extends State<OTPForm> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(result['message']),
+              content: Text(result['message'] ?? 'OTP sent successfully'),
               backgroundColor: kPrimaryColor,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           );
         }
@@ -181,8 +206,12 @@ class _OTPFormState extends State<OTPForm> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(result['message']),
+              content: Text(result['message'] ?? 'Failed to resend OTP'),
               backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           );
         }
@@ -193,6 +222,10 @@ class _OTPFormState extends State<OTPForm> {
           SnackBar(
             content: Text('Error: $e'),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
         );
       }
@@ -210,6 +243,46 @@ class _OTPFormState extends State<OTPForm> {
     return Form(
       child: Column(
         children: [
+          // Welcome message based on user type
+          Container(
+            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.only(bottom: defaultPadding),
+            decoration: BoxDecoration(
+              color: widget.isNewUser 
+                  ? Colors.green.withOpacity(0.1)
+                  : kPrimaryColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: widget.isNewUser 
+                    ? Colors.green.withOpacity(0.3)
+                    : kPrimaryColor.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  widget.isNewUser ? Icons.celebration : Icons.login,
+                  color: widget.isNewUser ? Colors.green : kPrimaryColor,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    widget.isNewUser 
+                        ? 'Welcome ${widget.name}! Complete your registration'
+                        : 'Welcome back ${widget.name}!',
+                    style: TextStyle(
+                      color: widget.isNewUser ? Colors.green : kPrimaryColor,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
           Text(
             'Enter the 6-digit OTP sent to',
             style: TextStyle(
@@ -284,26 +357,67 @@ class _OTPFormState extends State<OTPForm> {
           const SizedBox(height: defaultPadding * 2),
           
           // Verify Button
-          ElevatedButton(
-            onPressed: (_isOTPComplete() && !_isVerifying) ? _verifyOTP : null,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: (_isOTPComplete() && !_isVerifying) ? kPrimaryColor : Colors.grey,
+          Container(
+            width: double.infinity,
+            height: 56,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: (_isOTPComplete() && !_isVerifying) 
+                    ? [kPrimaryColor, kPrimaryColor.withOpacity(0.8)]
+                    : [Colors.grey, Colors.grey.withOpacity(0.8)],
+                begin: Alignment.centerLeft,
+                end: Alignment.centerRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: (_isOTPComplete() && !_isVerifying) 
+                  ? [
+                      BoxShadow(
+                        color: kPrimaryColor.withOpacity(0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                    ]
+                  : [],
             ),
-            child: _isVerifying
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            child: ElevatedButton(
+              onPressed: (_isOTPComplete() && !_isVerifying) ? _verifyOTP : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.transparent,
+                shadowColor: Colors.transparent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: _isVerifying
+                  ? const SizedBox(
+                      height: 24,
+                      width: 24,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          widget.isNewUser ? Icons.check_circle : Icons.verified,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.isNewUser ? "Complete Registration" : "Verify & Login",
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ],
                     ),
-                  )
-                : const Text(
-                    "VERIFY OTP",
-                    style: TextStyle(
-                      color: Colors.white,
-                    ),
-                  ),
+            ),
           ),
           
           const SizedBox(height: defaultPadding),
@@ -333,14 +447,14 @@ class _OTPFormState extends State<OTPForm> {
           
           const SizedBox(height: defaultPadding),
           
-          // Back to Login
+          // Back to Login/Signup
           TextButton(
             onPressed: () {
               Navigator.pop(context);
             },
-            child: const Text(
-              "← Back to Login",
-              style: TextStyle(
+            child: Text(
+              widget.isNewUser ? "← Back to Sign Up" : "← Back to Login",
+              style: const TextStyle(
                 color: kPrimaryColor,
               ),
             ),

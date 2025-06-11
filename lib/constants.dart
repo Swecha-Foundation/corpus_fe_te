@@ -22,7 +22,7 @@ class ApiConstants {
   
   static const Duration requestTimeout = Duration(seconds: 30);
   
-  // API Version
+  
   static const String apiVersion = 'v1';
   
   // Headers

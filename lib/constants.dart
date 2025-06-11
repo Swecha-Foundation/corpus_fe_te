@@ -8,7 +8,7 @@ const double defaultPadding = 16.0;
 
 
 class ApiConstants {
-  // Base URL for the backend API
+  
   static const String baseUrl = 'https://backend2.swecha.org/api/v1';
   
   // API Endpoints

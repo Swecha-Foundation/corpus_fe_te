@@ -6,6 +6,7 @@ import 'dart:async';
 
 class UserApiService {
   static const String baseUrl = 'https://backend2.swecha.org/api/v1';
+  static const Duration timeoutDuration = Duration(seconds: 30);
   
   // Create new user
   static Future<Map<String, dynamic>> createUser({
@@ -15,10 +16,10 @@ class UserApiService {
     required String gender,
     required DateTime dateOfBirth,
     required String place,
-    required String password, // Add password parameter
+    required String password,
   }) async {
     try {
-      print('Creating user with phone: $phone'); // Debug log
+      print('Creating user with phone: $phone');
       
       final response = await http.post(
         Uri.parse('$baseUrl/users/'),
@@ -31,15 +32,15 @@ class UserApiService {
           'name': name,
           'email': email,
           'gender': gender,
-          'date_of_birth': dateOfBirth.toIso8601String().split('T')[0], // Format as YYYY-MM-DD
+          'date_of_birth': dateOfBirth.toIso8601String().split('T')[0],
           'place': place,
-          'password': password, // Include password in request body
+          'password': password,
           'has_given_consent': true,
         }),
-      );
+      ).timeout(timeoutDuration);
       
-      print('Create User Response Status: ${response.statusCode}'); // Debug log
-      print('Create User Response Body: ${response.body}'); // Debug log
+      print('Create User Response Status: ${response.statusCode}');
+      print('Create User Response Body: ${response.body}');
       
       if (response.statusCode == 200 || response.statusCode == 201) {
         final responseData = jsonDecode(response.body);
@@ -49,158 +50,52 @@ class UserApiService {
           'message': 'User created successfully'
         };
       } else {
-        final errorData = jsonDecode(response.body);
+        final errorData = _parseErrorResponse(response.body);
         return {
           'success': false,
-          'message': errorData['detail'] ?? errorData['message'] ?? 'Failed to create user',
+          'message': errorData['message'] ?? 'Failed to create user',
           'error': errorData
         };
       }
-    } catch (e) {
-      print('Create User Error: $e'); // Debug log
+    } on TimeoutException {
       return {
         'success': false,
-        'message': 'Network error: $e',
+        'message': 'Request timed out. Please check your internet connection.',
+        'error': 'timeout'
+      };
+    } catch (e) {
+      print('Create User Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
         'error': e.toString()
       };
     }
   }
   
-  // Check if user exists by phone number (FIXED - now uses getUserByPhone)
-  static Future<Map<String, dynamic>> checkUserExists(String phone) async {
+  // Get user by phone number using the dedicated endpoint
+  static Future<Map<String, dynamic>> getUserByPhone(String phone) async {
     try {
-      print('Checking if user exists with phone: $phone'); // Debug log
-      
-      // Use the existing getUserByPhone method instead of non-existent endpoint
-      final response = await getUserByPhone(phone);
-      
-      if (response['success']) {
-        return {
-          'success': true,
-          'data': response['data'],
-          'message': 'User exists'
-        };
-      } else if (response['error'] == 'user_not_found') {
-        return {
-          'success': false,
-          'message': 'User not found',
-          'error': 'user_not_found'
-        };
-      } else if (response['error'] == 'not_authenticated') {
-        // If authentication is required, try a different approach
-        // This might happen if the getUserByPhone endpoint requires auth
-        print('Authentication required for getUserByPhone, trying alternative approach');
-        
-        // Try to use the users endpoint without auth first
-        try {
-          final directResponse = await http.get(
-            Uri.parse('$baseUrl/users/?phone=$phone'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-          );
-          
-          print('Direct User Check Response Status: ${directResponse.statusCode}');
-          print('Direct User Check Response Body: ${directResponse.body}');
-          
-          if (directResponse.statusCode == 200) {
-            final responseData = jsonDecode(directResponse.body);
-            
-            // Check if user exists
-            if (responseData is List && responseData.isNotEmpty) {
-              return {
-                'success': true,
-                'data': responseData.first,
-                'message': 'User exists'
-              };
-            } else if (responseData is Map && responseData.isNotEmpty) {
-              return {
-                'success': true,
-                'data': responseData,
-                'message': 'User exists'
-              };
-            } else {
-              return {
-                'success': false,
-                'message': 'User not found',
-                'error': 'user_not_found'
-              };
-            }
-          } else {
-            return {
-              'success': false,
-              'message': 'User not found',
-              'error': 'user_not_found'
-            };
-          }
-        } catch (e) {
-          print('Direct user check error: $e');
-          return {
-            'success': false,
-            'message': 'User not found',
-            'error': 'user_not_found'
-          };
-        }
-      } else {
-        return response; // Return the original error response
-      }
-    } catch (e) {
-      print('Check User Error: $e'); // Debug log
-      return {
-        'success': false,
-        'message': 'Network error: $e',
-        'error': e.toString()
-      };
-    }
-  }
-  
-  // Get user by phone number (Note: This requires authentication)
-  static Future<Map<String, dynamic>> getUserByPhone(String phone, {String? authToken}) async {
-    try {
-      print('Getting user by phone: $phone'); // Debug log
-      
-      Map<String, String> headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      };
-      
-      // Add authorization header if token is provided
-      if (authToken != null) {
-        headers['Authorization'] = 'Bearer $authToken';
-      }
+      print('Getting user by phone: $phone');
       
       final response = await http.get(
-        Uri.parse('$baseUrl/users/?phone=$phone'),
-        headers: headers,
-      );
+        Uri.parse('$baseUrl/users/phone/$phone'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+      ).timeout(timeoutDuration);
       
-      print('Get User Response Status: ${response.statusCode}'); // Debug log
-      print('Get User Response Body: ${response.body}'); // Debug log
+      print('Get User By Phone Response Status: ${response.statusCode}');
+      print('Get User By Phone Response Body: ${response.body}');
       
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
-        
-        // Check if user exists (assuming API returns a list or single user object)
-        if (responseData is List && responseData.isNotEmpty) {
-          return {
-            'success': true,
-            'data': responseData.first,
-            'message': 'User found'
-          };
-        } else if (responseData is Map && responseData.isNotEmpty) {
-          return {
-            'success': true,
-            'data': responseData,
-            'message': 'User found'
-          };
-        } else {
-          return {
-            'success': false,
-            'message': 'User not found',
-            'error': 'user_not_found'
-          };
-        }
+        return {
+          'success': true,
+          'data': responseData,
+          'message': 'User found successfully'
+        };
       } else if (response.statusCode == 404) {
         return {
           'success': false,
@@ -210,22 +105,74 @@ class UserApiService {
       } else if (response.statusCode == 403) {
         return {
           'success': false,
-          'message': 'Authentication required',
-          'error': 'not_authenticated'
+          'message': 'Access forbidden. Authentication may be required.',
+          'error': 'forbidden'
         };
-      } else {
-        final errorData = jsonDecode(response.body);
+      } else if (response.statusCode == 422) {
         return {
           'success': false,
-          'message': errorData['detail'] ?? errorData['message'] ?? 'Failed to get user',
+          'message': 'Invalid phone number format',
+          'error': 'validation_error'
+        };
+      } else {
+        final errorData = _parseErrorResponse(response.body);
+        return {
+          'success': false,
+          'message': errorData['message'] ?? 'Failed to get user',
           'error': errorData
         };
       }
-    } catch (e) {
-      print('Get User Error: $e'); // Debug log
+    } on TimeoutException {
       return {
         'success': false,
-        'message': 'Network error: $e',
+        'message': 'Request timed out. Please check your internet connection.',
+        'error': 'timeout'
+      };
+    } catch (e) {
+      print('Get User By Phone Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'error': e.toString()
+      };
+    }
+  }
+  
+  // Check if user exists - now using the dedicated endpoint
+  static Future<Map<String, dynamic>> checkUserExists(String phone) async {
+    try {
+      print('Checking if user exists with phone: $phone');
+      
+      final result = await getUserByPhone(phone);
+      
+      if (result['success']) {
+        return {
+          'success': true,
+          'data': {
+            'phone': phone,
+            'exists': true,
+            'user': result['data']
+          },
+          'message': 'User exists'
+        };
+      } else if (result['error'] == 'user_not_found') {
+        return {
+          'success': false,
+          'data': {
+            'phone': phone,
+            'exists': false
+          },
+          'message': 'User not found',
+          'error': 'user_not_found'
+        };
+      } else {
+        return result; // Return the original error
+      }
+    } catch (e) {
+      print('Check User Exists Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
         'error': e.toString()
       };
     }
@@ -237,10 +184,10 @@ class UserApiService {
     required String password,
   }) async {
     try {
-      print('Logging in user with phone: $phone'); // Debug log
+      print('Logging in user with phone: $phone');
       
       final response = await http.post(
-        Uri.parse('$baseUrl/auth/login'), // Adjust endpoint as needed
+        Uri.parse('$baseUrl/auth/login'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -249,10 +196,10 @@ class UserApiService {
           'phone': phone,
           'password': password,
         }),
-      );
+      ).timeout(timeoutDuration);
       
-      print('Login Response Status: ${response.statusCode}'); // Debug log
-      print('Login Response Body: ${response.body}'); // Debug log
+      print('Login Response Status: ${response.statusCode}');
+      print('Login Response Body: ${response.body}');
       
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -262,45 +209,61 @@ class UserApiService {
           'message': 'Login successful'
         };
       } else {
-        final errorData = jsonDecode(response.body);
+        final errorData = _parseErrorResponse(response.body);
+        String errorMessage = errorData['message'] ?? 'Login failed';
+        
+        // Provide more user-friendly error messages
+        if (_isInvalidCredentialsError(errorMessage)) {
+          errorMessage = 'Invalid phone number or password';
+        } else if (_isUserNotFoundError(errorMessage)) {
+          errorMessage = 'No account found with this phone number';
+        }
+        
         return {
           'success': false,
-          'message': errorData['detail'] ?? errorData['message'] ?? 'Login failed',
+          'message': errorMessage,
           'error': errorData
         };
       }
-    } catch (e) {
-      print('Login Error: $e'); // Debug log
+    } on TimeoutException {
       return {
         'success': false,
-        'message': 'Network error: $e',
+        'message': 'Request timed out. Please check your internet connection.',
+        'error': 'timeout'
+      };
+    } catch (e) {
+      print('Login Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
         'error': e.toString()
       };
     }
   }
   
-  // Verify OTP and get user data (this should be called after OTP verification)
+  // Verify OTP and get user data
   static Future<Map<String, dynamic>> verifyOTPAndGetUser({
     required String phone,
     required String otp,
   }) async {
     try {
-      print('Verifying OTP and getting user data for phone: $phone'); // Debug log
+      print('Verifying OTP and getting user data for phone: $phone');
       
       final response = await http.post(
-        Uri.parse('$baseUrl/auth/verify-otp'), // Adjust endpoint as needed
+        Uri.parse('$baseUrl/auth/verify-otp'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
         body: jsonEncode({
-          'phone': phone,
-          'otp': otp,
+          'phone_number': phone,
+          'otp_code': otp,
+          'has_given_consent': true,
         }),
-      );
+      ).timeout(timeoutDuration);
       
-      print('Verify OTP Response Status: ${response.statusCode}'); // Debug log
-      print('Verify OTP Response Body: ${response.body}'); // Debug log
+      print('Verify OTP Response Status: ${response.statusCode}');
+      print('Verify OTP Response Body: ${response.body}');
       
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -310,18 +273,24 @@ class UserApiService {
           'message': 'OTP verified successfully'
         };
       } else {
-        final errorData = jsonDecode(response.body);
+        final errorData = _parseErrorResponse(response.body);
         return {
           'success': false,
-          'message': errorData['detail'] ?? errorData['message'] ?? 'OTP verification failed',
+          'message': errorData['message'] ?? 'OTP verification failed',
           'error': errorData
         };
       }
-    } catch (e) {
-      print('Verify OTP Error: $e'); // Debug log
+    } on TimeoutException {
       return {
         'success': false,
-        'message': 'Network error: $e',
+        'message': 'Request timed out. Please check your internet connection.',
+        'error': 'timeout'
+      };
+    } catch (e) {
+      print('Verify OTP Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
         'error': e.toString()
       };
     }
@@ -330,14 +299,13 @@ class UserApiService {
   // Update user's last login
   static Future<Map<String, dynamic>> updateLastLogin(String userId, {String? authToken}) async {
     try {
-      print('Updating last login for user: $userId'); // Debug log
+      print('Updating last login for user: $userId');
       
       Map<String, String> headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       };
       
-      // Add authorization header if token is provided
       if (authToken != null) {
         headers['Authorization'] = 'Bearer $authToken';
       }
@@ -348,10 +316,10 @@ class UserApiService {
         body: jsonEncode({
           'last_login_at': DateTime.now().toIso8601String(),
         }),
-      );
+      ).timeout(timeoutDuration);
       
-      print('Update Last Login Response Status: ${response.statusCode}'); // Debug log
-      print('Update Last Login Response Body: ${response.body}'); // Debug log
+      print('Update Last Login Response Status: ${response.statusCode}');
+      print('Update Last Login Response Body: ${response.body}');
       
       if (response.statusCode == 200) {
         final responseData = jsonDecode(response.body);
@@ -361,20 +329,120 @@ class UserApiService {
           'message': 'Last login updated successfully'
         };
       } else {
-        final errorData = jsonDecode(response.body);
+        final errorData = _parseErrorResponse(response.body);
         return {
           'success': false,
-          'message': errorData['detail'] ?? errorData['message'] ?? 'Failed to update last login',
+          'message': errorData['message'] ?? 'Failed to update last login',
           'error': errorData
         };
       }
-    } catch (e) {
-      print('Update Last Login Error: $e'); // Debug log
+    } on TimeoutException {
       return {
         'success': false,
-        'message': 'Network error: $e',
+        'message': 'Request timed out. Please check your internet connection.',
+        'error': 'timeout'
+      };
+    } catch (e) {
+      print('Update Last Login Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
         'error': e.toString()
       };
     }
+  }
+  
+  // Get user profile (requires authentication)
+  static Future<Map<String, dynamic>> getUserProfile(String userId, {required String authToken}) async {
+    try {
+      print('Getting user profile for ID: $userId');
+      
+      final response = await http.get(
+        Uri.parse('$baseUrl/users/$userId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $authToken',
+        },
+      ).timeout(timeoutDuration);
+      
+      print('Get User Profile Response Status: ${response.statusCode}');
+      print('Get User Profile Response Body: ${response.body}');
+      
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        return {
+          'success': true,
+          'data': responseData,
+          'message': 'User profile retrieved successfully'
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'User not found',
+          'error': 'user_not_found'
+        };
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        return {
+          'success': false,
+          'message': 'Authentication required',
+          'error': 'not_authenticated'
+        };
+      } else {
+        final errorData = _parseErrorResponse(response.body);
+        return {
+          'success': false,
+          'message': errorData['message'] ?? 'Failed to get user profile',
+          'error': errorData
+        };
+      }
+    } on TimeoutException {
+      return {
+        'success': false,
+        'message': 'Request timed out. Please check your internet connection.',
+        'error': 'timeout'
+      };
+    } catch (e) {
+      print('Get User Profile Error: $e');
+      return {
+        'success': false,
+        'message': 'Network error: ${e.toString()}',
+        'error': e.toString()
+      };
+    }
+  }
+  
+  // Helper method to parse error responses safely
+  static Map<String, dynamic> _parseErrorResponse(String responseBody) {
+    try {
+      final decoded = jsonDecode(responseBody);
+      if (decoded is Map<String, dynamic>) {
+        return {
+          'message': decoded['detail'] ?? decoded['message'] ?? decoded['error'] ?? 'An error occurred',
+          'details': decoded
+        };
+      }
+      return {'message': 'An error occurred', 'details': decoded};
+    } catch (e) {
+      return {'message': 'An error occurred', 'details': responseBody};
+    }
+  }
+  
+  // Helper method to check if error indicates user not found
+  static bool _isUserNotFoundError(String errorMessage) {
+    final message = errorMessage.toLowerCase();
+    return message.contains('user not found') || 
+           message.contains('does not exist') ||
+           message.contains('user does not exist') ||
+           message.contains('no user found');
+  }
+  
+  // Helper method to check if error indicates invalid credentials
+  static bool _isInvalidCredentialsError(String errorMessage) {
+    final message = errorMessage.toLowerCase();
+    return message.contains('invalid credentials') ||
+           message.contains('incorrect') ||
+           message.contains('wrong password') ||
+           message.contains('authentication failed');
   }
 }

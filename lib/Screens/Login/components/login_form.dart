@@ -8,7 +8,7 @@ import '../../../services/otp_api_service.dart';
 import '../../../services/user_api_service.dart';
 import '../../Signup/signup_screen.dart';
 import '../../OTP/otp_screen.dart';
-import '../../Dashboard/dashboard_screen.dart'; // Add this import
+import '../../Dashboard/dashboard_screen.dart';
 
 class LoginForm extends StatefulWidget {
   const LoginForm({
@@ -35,7 +35,7 @@ class _LoginFormState extends State<LoginForm> {
   }
 
   void _showSnackBar(String message, Color backgroundColor, {SnackBarAction? action}) {
-    if (mounted && context.mounted) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
@@ -52,6 +52,7 @@ class _LoginFormState extends State<LoginForm> {
 
   void _handleOTPLogin() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -62,65 +63,106 @@ class _LoginFormState extends State<LoginForm> {
     try {
       print('Attempting OTP login for phone: $phoneNumber');
       
-      // Use the fixed checkUserExists method
+      if (!mounted) return;
+      
+      // First, check if user exists using the dedicated endpoint
       final userExistsResult = await UserApiService.checkUserExists(phoneNumber);
       
-      print('User exists result: ${userExistsResult}'); // Debug log
+      if (!mounted) return;
+      
+      print('User exists check result: $userExistsResult');
       
       if (userExistsResult['success']) {
-        // User exists, send OTP
-        print('User found, sending OTP...');
+        // User exists, now send OTP
+        print('User exists - Sending OTP');
+        
         final otpResult = await OTPApiService.sendOTP(phoneNumber);
         
-        print('OTP result: ${otpResult}'); // Debug log
+        if (!mounted) return;
+        
+        print('OTP result: $otpResult');
         
         if (otpResult['success']) {
           print('OTP sent successfully');
           if (mounted) {
+            // Show success message
+            _showSnackBar('OTP sent to your phone number', Colors.green);
+            
+            // Get user data from the existence check
+            final userData = userExistsResult['data']['user'];
+            String userName = userData?['name'] ?? 'User';
+            
+            // Navigate to OTP screen
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => OTPScreen(
                   phoneNumber: phoneNumber,
-                  name: userExistsResult['data']['name'] ?? 'User',
+                  name: userName,
                   isNewUser: false,
-                  userData: userExistsResult['data'],
+                  userData: userData ?? {'phone': phoneNumber},
                 ),
               ),
             );
           }
         } else {
-          print('Failed to send OTP: ${otpResult['message']}');
-          _showSnackBar(
-            'Failed to send OTP: ${otpResult['message']}',
-            Colors.red,
-          );
+          // Failed to send OTP even though user exists
+          String errorMessage = otpResult['message'] ?? 'Failed to send OTP';
+          String errorType = otpResult['error'] ?? '';
+          
+          if (errorType == 'rate_limit_client_side' || errorType == 'rate_limit_server_side') {
+            // Handle rate limiting
+            int waitTime = otpResult['waitTime'] ?? 30;
+            _showSnackBar(
+              'Please wait $waitTime seconds before requesting another OTP',
+              Colors.orange,
+            );
+          } else {
+            // Other errors
+            _showSnackBar(errorMessage, Colors.red);
+          }
         }
       } else {
         // User doesn't exist
-        print('User not found: ${userExistsResult['message']}');
-        _showSnackBar(
-          'No account found with this phone number. Please sign up first.',
-          Colors.orange,
-          action: SnackBarAction(
-            label: 'Sign Up',
-            textColor: Colors.white,
-            onPressed: () {
-              if (mounted) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const SignUpScreen(),
-                  ),
-                );
-              }
-            },
-          ),
-        );
+        print('User does not exist: ${userExistsResult['message']}');
+        
+        String errorType = userExistsResult['error'] ?? '';
+        
+        if (errorType == 'user_not_found') {
+          _showSnackBar(
+            'No account found with this phone number. Please sign up first.',
+            Colors.orange,
+            action: SnackBarAction(
+              label: 'Sign Up',
+              textColor: Colors.white,
+              onPressed: () {
+                if (mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SignUpScreen(),
+                    ),
+                  );
+                }
+              },
+            ),
+          );
+        } else if (errorType == 'forbidden') {
+          _showSnackBar(
+            'Unable to verify user. Please try again or contact support.',
+            Colors.red,
+          );
+        } else {
+          // Other errors (network, validation, etc.)
+          String errorMessage = userExistsResult['message'] ?? 'Failed to verify user';
+          _showSnackBar(errorMessage, Colors.red);
+        }
       }
     } catch (e) {
       print('OTP Login error: $e');
-      _showSnackBar('Error: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar('Network error occurred. Please try again.', Colors.red);
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -132,6 +174,7 @@ class _LoginFormState extends State<LoginForm> {
 
   void _handlePasswordLogin() async {
     if (!_formKey.currentState!.validate()) return;
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -143,35 +186,47 @@ class _LoginFormState extends State<LoginForm> {
     try {
       print('Attempting password login for phone: $phoneNumber');
       
+      if (!mounted) return;
+      
       final loginResult = await UserApiService.loginUser(
         phone: phoneNumber,
         password: password,
       );
       
+      if (!mounted) return;
+      
       if (loginResult['success']) {
         // Password login successful
         print('Password login successful');
         
-        // Update last login
-        String? userId = loginResult['data']['user']?['id']?.toString();
-        String? authToken = loginResult['data']['token'] ?? loginResult['data']['access_token'];
+        // Extract user data and token
+        final responseData = loginResult['data'];
+        String? userId = responseData['user']?['id']?.toString();
+        String? authToken = responseData['token'] ?? responseData['access_token'];
         
-        if (userId != null && authToken != null) {
-          await UserApiService.updateLastLogin(userId, authToken: authToken);
+        // Update last login if we have the required data
+        if (userId != null && authToken != null && mounted) {
+          try {
+            await UserApiService.updateLastLogin(userId, authToken: authToken);
+          } catch (e) {
+            print('Failed to update last login: $e');
+            // Continue with login process even if last login update fails
+          }
         }
+        
+        if (!mounted) return;
         
         // Show success message
         _showSnackBar('Login successful!', Colors.green);
         
-        // Navigate to dashboard screen
+        // Get user data from login result
+        final userData = responseData['user'];
+        String userName = userData?['name'] ?? 'User';
+        
+        // Add a small delay to show the success message
+        await Future.delayed(const Duration(milliseconds: 500));
+        
         if (mounted) {
-          // Get user data from login result
-          final userData = loginResult['data']['user'];
-          String userName = userData?['name'] ?? 'User';
-          
-          // Add a small delay to show the success message
-          await Future.delayed(const Duration(milliseconds: 500));
-          
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(
@@ -185,14 +240,24 @@ class _LoginFormState extends State<LoginForm> {
         
       } else {
         // Password login failed
-        _showSnackBar(
-          loginResult['message'] ?? 'Login failed',
-          Colors.red,
-        );
+        String errorMessage = loginResult['message'] ?? 'Login failed';
+        
+        // Provide more user-friendly error messages
+        if (errorMessage.toLowerCase().contains('invalid') || 
+            errorMessage.toLowerCase().contains('incorrect')) {
+          errorMessage = 'Invalid phone number or password';
+        } else if (errorMessage.toLowerCase().contains('user not found') || 
+                   errorMessage.toLowerCase().contains('does not exist')) {
+          errorMessage = 'No account found with this phone number';
+        }
+        
+        _showSnackBar(errorMessage, Colors.red);
       }
     } catch (e) {
       print('Password Login error: $e');
-      _showSnackBar('Error: $e', Colors.red);
+      if (mounted) {
+        _showSnackBar('Network error occurred. Please try again.', Colors.red);
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -221,9 +286,11 @@ class _LoginFormState extends State<LoginForm> {
                 Expanded(
                   child: GestureDetector(
                     onTap: () {
-                      setState(() {
-                        _usePasswordLogin = false;
-                      });
+                      if (!_isLoading) {
+                        setState(() {
+                          _usePasswordLogin = false;
+                        });
+                      }
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -245,9 +312,11 @@ class _LoginFormState extends State<LoginForm> {
                 Expanded(
                   child: GestureDetector(
                     onTap: () {
-                      setState(() {
-                        _usePasswordLogin = true;
-                      });
+                      if (!_isLoading) {
+                        setState(() {
+                          _usePasswordLogin = true;
+                        });
+                      }
                     },
                     child: Container(
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -318,6 +387,7 @@ class _LoginFormState extends State<LoginForm> {
               keyboardType: TextInputType.phone,
               textInputAction: _usePasswordLogin ? TextInputAction.next : TextInputAction.done,
               maxLength: 10,
+              enabled: !_isLoading,
               inputFormatters: [
                 FilteringTextInputFormatter.digitsOnly,
                 LengthLimitingTextInputFormatter(10),
@@ -328,6 +398,10 @@ class _LoginFormState extends State<LoginForm> {
                 }
                 if (value.trim().length != 10) {
                   return 'Please enter exactly 10 digits';
+                }
+                // Basic validation for Indian phone numbers (starts with 6-9)
+                if (!RegExp(r'^[6-9]\d{9}$').hasMatch(value.trim())) {
+                  return 'Please enter a valid phone number';
                 }
                 return null;
               },
@@ -362,9 +436,13 @@ class _LoginFormState extends State<LoginForm> {
                 controller: _passwordController,
                 obscureText: _obscurePassword,
                 textInputAction: TextInputAction.done,
+                enabled: !_isLoading,
                 validator: (value) {
                   if (_usePasswordLogin && (value == null || value.trim().isEmpty)) {
                     return 'Please enter your password';
+                  }
+                  if (_usePasswordLogin && value!.length < 6) {
+                    return 'Password must be at least 6 characters';
                   }
                   return null;
                 },
@@ -377,11 +455,11 @@ class _LoginFormState extends State<LoginForm> {
                     color: kPrimaryColor,
                   ),
                   suffixIcon: IconButton(
-                    onPressed: () {
+                    onPressed: !_isLoading ? () {
                       setState(() {
                         _obscurePassword = !_obscurePassword;
                       });
-                    },
+                    } : null,
                     icon: Icon(
                       _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
                       color: Colors.grey[600],
@@ -419,7 +497,7 @@ class _LoginFormState extends State<LoginForm> {
               ],
             ),
             child: ElevatedButton(
-              onPressed: _isLoading 
+              onPressed: _isLoading
                   ? null 
                   : (_usePasswordLogin ? _handlePasswordLogin : _handleOTPLogin),
               style: ElevatedButton.styleFrom(
@@ -467,7 +545,7 @@ class _LoginFormState extends State<LoginForm> {
           AlreadyHaveAnAccountCheck(
             login: true,
             press: () {
-              if (mounted) {
+              if (!_isLoading && mounted) {
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(

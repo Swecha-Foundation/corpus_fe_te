@@ -4,13 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../constants.dart';
+import '../../services/api_service.dart'; 
 
 class PictureInputScreen extends StatefulWidget {
   final String? selectedCategory;
+  final String? categoryId; // Add category ID for API
+  final String? userId; // Add user ID for API
   
   const PictureInputScreen({
     Key? key,
     this.selectedCategory,
+    this.categoryId,
+    this.userId,
   }) : super(key: key);
 
   @override
@@ -19,11 +24,14 @@ class PictureInputScreen extends StatefulWidget {
 
 class _PictureInputScreenState extends State<PictureInputScreen> {
   final TextEditingController _captionController = TextEditingController();
+  final TextEditingController _titleController = TextEditingController(); // Add title controller
   final ImagePicker _picker = ImagePicker();
   List<XFile> _selectedImages = [];
   bool _isProcessing = false;
+  bool _isUploading = false;
   String _selectedLanguage = 'Telugu';
   int _captionWordCount = 0;
+  String? _createdRecordId; // Store the created record ID
 
   @override
   void initState() {
@@ -35,6 +43,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
   void dispose() {
     _captionController.removeListener(_updateCaptionWordCount);
     _captionController.dispose();
+    _titleController.dispose();
     super.dispose();
   }
 
@@ -96,9 +105,14 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
     _showSnackBar('Image removed', Colors.grey);
   }
 
-  void _processImages() {
+  Future<void> _processImages() async {
     if (_selectedImages.isEmpty) {
       _showSnackBar('Please select at least one image', Colors.orange);
+      return;
+    }
+
+    if (_titleController.text.trim().isEmpty) {
+      _showSnackBar('Please enter a title', Colors.orange);
       return;
     }
 
@@ -106,13 +120,37 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       _isProcessing = true;
     });
 
-    // Simulate processing time
-    Future.delayed(const Duration(seconds: 2), () {
+    try {
+      // First create a record
+      final recordResponse = await ApiService.createRecord(
+        title: _titleController.text.trim(),
+        description: _captionController.text.trim(),
+        categoryId: widget.categoryId ?? '1', // Default category ID if not provided
+        userId: widget.userId ?? 'default_user', // Default user ID if not provided
+        mediaType: 'image',
+      );
+
+      if (recordResponse['success'] == true) {
+        _createdRecordId = recordResponse['data']['id']?.toString();
+        setState(() {
+          _isProcessing = false;
+        });
+        _showSubmitDialog();
+      } else {
+        setState(() {
+          _isProcessing = false;
+        });
+        _showSnackBar(
+          recordResponse['message'] ?? 'Failed to create record',
+          Colors.red,
+        );
+      }
+    } catch (e) {
       setState(() {
         _isProcessing = false;
       });
-      _showSubmitDialog();
-    });
+      _showSnackBar('Error processing: $e', Colors.red);
+    }
   }
 
   void _showSubmitDialog() {
@@ -125,13 +163,14 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text('Title: ${_titleController.text.trim()}'),
               Text('Images: ${_selectedImages.length}'),
               Text('Caption words: $_captionWordCount'),
               Text('Language: $_selectedLanguage'),
               if (widget.selectedCategory != null)
                 Text('Category: ${widget.selectedCategory}'),
               const SizedBox(height: 16),
-              const Text('Are you ready to submit your content?'),
+              const Text('Are you ready to upload your images?'),
             ],
           ),
           actions: [
@@ -142,13 +181,13 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _submitContent();
+                _uploadImages();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: kPrimaryColor,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Submit'),
+              child: const Text('Upload'),
             ),
           ],
         );
@@ -156,16 +195,98 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
     );
   }
 
-  void _submitContent() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Content submitted successfully! (${_selectedImages.length} images)'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-    
-    Navigator.pop(context);
+  Future<void> _uploadImages() async {
+    if (_createdRecordId == null) {
+      _showSnackBar('No record created. Please try again.', Colors.red);
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+    });
+
+    int successCount = 0;
+    int failureCount = 0;
+
+    for (int i = 0; i < _selectedImages.length; i++) {
+      try {
+        final file = File(_selectedImages[i].path);
+        final uploadResponse = await ApiService.uploadRecord(
+          recordId: _createdRecordId!,
+          file: file,
+          description: 'Image ${i + 1} - ${_captionController.text.trim()}',
+        );
+
+        if (uploadResponse['success'] == true) {
+          successCount++;
+        } else {
+          failureCount++;
+        }
+      } catch (e) {
+        failureCount++;
+        print('Upload error for image $i: $e');
+      }
+    }
+
+    setState(() {
+      _isUploading = false;
+    });
+
+    if (successCount > 0) {
+      _showSnackBar(
+        'Successfully uploaded $successCount/${_selectedImages.length} images',
+        failureCount > 0 ? Colors.orange : Colors.green,
+      );
+      
+      if (failureCount == 0) {
+        // All images uploaded successfully, navigate back
+        Future.delayed(const Duration(seconds: 2), () {
+          Navigator.pop(context);
+        });
+      }
+    } else {
+      _showSnackBar('Failed to upload images. Please try again.', Colors.red);
+    }
+  }
+
+  Future<void> _saveDraft() async {
+    if (_titleController.text.trim().isEmpty && 
+        _captionController.text.trim().isEmpty && 
+        _selectedImages.isEmpty) {
+      _showSnackBar('Nothing to save', Colors.orange);
+      return;
+    }
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      final recordResponse = await ApiService.createRecord(
+        title: _titleController.text.trim().isEmpty 
+            ? 'Draft - ${DateTime.now().toString().substring(0, 16)}' 
+            : 'Draft - ${_titleController.text.trim()}',
+        description: _captionController.text.trim(),
+        categoryId: widget.categoryId ?? '1',
+        userId: widget.userId ?? 'default_user',
+        mediaType: 'image',
+      );
+
+      setState(() {
+        _isProcessing = false;
+      });
+
+      if (recordResponse['success'] == true) {
+        _showSnackBar('Draft saved successfully', Colors.green);
+      } else {
+        _showSnackBar('Failed to save draft', Colors.red);
+      }
+    } catch (e) {
+      setState(() {
+        _isProcessing = false;
+      });
+      _showSnackBar('Error saving draft: $e', Colors.red);
+    }
   }
 
   void _showSnackBar(String message, Color color) {
@@ -173,7 +294,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: color,
-        duration: const Duration(seconds: 2),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -184,7 +305,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Clear All'),
-          content: const Text('Are you sure you want to clear all images and caption?'),
+          content: const Text('Are you sure you want to clear all content?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -196,6 +317,8 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                 setState(() {
                   _selectedImages.clear();
                   _captionController.clear();
+                  _titleController.clear();
+                  _createdRecordId = null;
                 });
               },
               child: const Text(
@@ -228,7 +351,9 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
           ),
         ),
         actions: [
-          if (_selectedImages.isNotEmpty || _captionController.text.isNotEmpty)
+          if (_selectedImages.isNotEmpty || 
+              _captionController.text.isNotEmpty ||
+              _titleController.text.isNotEmpty)
             IconButton(
               onPressed: _clearAll,
               icon: const Icon(Icons.clear, color: Colors.red),
@@ -309,7 +434,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Select images and add captions to tell your story',
+                    'Add title, select images and write captions',
                     style: TextStyle(
                       fontSize: 14,
                       color: Colors.grey,
@@ -324,6 +449,69 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
               child: SingleChildScrollView(
                 child: Column(
                   children: [
+                    // Title Input
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            offset: const Offset(0, 2),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.title, color: kPrimaryColor),
+                              SizedBox(width: 8),
+                              Text(
+                                'Title *',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _titleController,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              height: 1.5,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: _selectedLanguage == 'Telugu' 
+                                  ? 'మీ పోస్ట్ కు శీర్షిక రాయండి...'
+                                  : 'Enter a title for your post...',
+                              hintStyle: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 16,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.grey.shade300),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: kPrimaryColor),
+                              ),
+                              contentPadding: const EdgeInsets.all(12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
                     // Image Selection Buttons
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -514,23 +702,23 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                 children: [
                   // Process Button
                   GestureDetector(
-                    onTap: _isProcessing ? null : _processImages,
+                    onTap: (_isProcessing || _isUploading) ? null : _processImages,
                     child: Container(
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: _isProcessing ? Colors.grey : kPrimaryColor,
+                        color: (_isProcessing || _isUploading) ? Colors.grey : kPrimaryColor,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: (_isProcessing ? Colors.grey : kPrimaryColor)
+                            color: ((_isProcessing || _isUploading) ? Colors.grey : kPrimaryColor)
                                 .withOpacity(0.3),
                             offset: const Offset(0, 4),
                             blurRadius: 12,
                           ),
                         ],
                       ),
-                      child: _isProcessing
+                      child: (_isProcessing || _isUploading)
                           ? const CircularProgressIndicator(
                               color: Colors.white,
                               strokeWidth: 3,
@@ -544,7 +732,11 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    _isProcessing ? 'Processing images...' : 'Tap to process & submit',
+                    _isUploading 
+                        ? 'Uploading images...' 
+                        : _isProcessing 
+                            ? 'Creating record...' 
+                            : 'Tap to create & upload',
                     style: const TextStyle(
                       fontSize: 16,
                       color: Colors.grey,
@@ -560,7 +752,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                       _buildActionButton(
                         icon: Icons.save_outlined,
                         label: 'Save Draft',
-                        onTap: () => _showSnackBar('Draft saved successfully', Colors.green),
+                        onTap: _isProcessing ? null : _saveDraft,
                       ),
                       _buildActionButton(
                         icon: Icons.auto_fix_high,
@@ -637,7 +829,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
   Widget _buildActionButton({
     required IconData icon,
     required String label,
-    required VoidCallback onTap,
+    required VoidCallback? onTap,
   }) {
     return GestureDetector(
       onTap: onTap,
@@ -647,22 +839,22 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
             width: 50,
             height: 50,
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: onTap == null ? Colors.grey[200] : Colors.grey[100],
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: Colors.grey[300]!),
             ),
             child: Icon(
               icon,
-              color: kPrimaryColor,
+              color: onTap == null ? Colors.grey : kPrimaryColor,
               size: 24,
             ),
           ),
           const SizedBox(height: 8),
           Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 12,
-              color: Colors.grey,
+              color: onTap == null ? Colors.grey : Colors.grey[600],
             ),
             textAlign: TextAlign.center,
           ),

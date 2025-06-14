@@ -7,6 +7,7 @@ import '../../../constants.dart';
 import '../../../services/otp_api_service.dart';
 import '../../../services/user_api_service.dart';
 import '../../Signup/signup_screen.dart';
+import '../../../services/token_storage_service.dart'; 
 import '../../OTP/otp_screen.dart';
 import '../../Dashboard/dashboard_screen.dart';
 
@@ -45,6 +46,7 @@ class _LoginFormState extends State<LoginForm> {
             borderRadius: BorderRadius.circular(10),
           ),
           action: action,
+          duration: const Duration(seconds: 4),
         ),
       );
     }
@@ -72,7 +74,7 @@ class _LoginFormState extends State<LoginForm> {
       
       print('User exists check result: $userExistsResult');
       
-      if (userExistsResult['success']) {
+      if (userExistsResult['success'] == true) {
         // User exists, now send OTP
         print('User exists - Sending OTP');
         
@@ -82,14 +84,14 @@ class _LoginFormState extends State<LoginForm> {
         
         print('OTP result: $otpResult');
         
-        if (otpResult['success']) {
+        if (otpResult['success'] == true) {
           print('OTP sent successfully');
           if (mounted) {
             // Show success message
             _showSnackBar('OTP sent to your phone number', Colors.green);
             
             // Get user data from the existence check
-            final userData = userExistsResult['data']['user'];
+            final userData = userExistsResult['data']?['user'];
             String userName = userData?['name'] ?? 'User';
             
             // Navigate to OTP screen
@@ -195,14 +197,44 @@ class _LoginFormState extends State<LoginForm> {
       
       if (!mounted) return;
       
-      if (loginResult['success']) {
+      if (loginResult['success'] == true) {
         // Password login successful
         print('Password login successful');
         
-        // Extract user data and token
+        // Extract token and user data from response
         final responseData = loginResult['data'];
-        String? userId = responseData['user']?['id']?.toString();
-        String? authToken = responseData['token'] ?? responseData['access_token'];
+        if (responseData == null) {
+          throw Exception('Invalid response data');
+        }
+        
+        String? authToken = responseData['access_token']?.toString();
+        String tokenType = responseData['token_type']?.toString() ?? 'bearer';
+        
+        // Get user data
+        String? userId;
+        String userName = 'User'; // Default fallback
+        
+        // If you have user data in the response, extract it
+        if (responseData['user'] != null) {
+          final userData = responseData['user'];
+          userId = userData['id']?.toString();
+          userName = userData['name']?.toString() ?? 'User';
+        }
+        
+        // Store authentication data - only if authToken is not null
+        if (authToken != null && authToken.isNotEmpty) {
+          await TokenStorageService.storeAuthData(
+            token: authToken,
+            tokenType: tokenType,
+            userId: userId,
+            phoneNumber: phoneNumber,
+            userName: userName,
+          );
+          
+          print('Auth data stored successfully');
+        } else {
+          throw Exception('No authentication token received');
+        }
         
         // Update last login if we have the required data
         if (userId != null && authToken != null && mounted) {
@@ -219,15 +251,11 @@ class _LoginFormState extends State<LoginForm> {
         // Show success message
         _showSnackBar('Login successful!', Colors.green);
         
-        // Get user data from login result
-        final userData = responseData['user'];
-        String userName = userData?['name'] ?? 'User';
-        
         // Add a small delay to show the success message
         await Future.delayed(const Duration(milliseconds: 500));
         
         if (mounted) {
-          Navigator.pushReplacement(
+          Navigator.pushAndRemoveUntil(
             context,
             MaterialPageRoute(
               builder: (context) => DashboardScreen(
@@ -235,6 +263,7 @@ class _LoginFormState extends State<LoginForm> {
                 phoneNumber: phoneNumber,
               ),
             ),
+            (route) => false, // Remove all previous routes
           );
         }
         
@@ -244,7 +273,8 @@ class _LoginFormState extends State<LoginForm> {
         
         // Provide more user-friendly error messages
         if (errorMessage.toLowerCase().contains('invalid') || 
-            errorMessage.toLowerCase().contains('incorrect')) {
+            errorMessage.toLowerCase().contains('incorrect') ||
+            errorMessage.toLowerCase().contains('unauthorized')) {
           errorMessage = 'Invalid phone number or password';
         } else if (errorMessage.toLowerCase().contains('user not found') || 
                    errorMessage.toLowerCase().contains('does not exist')) {
@@ -256,7 +286,11 @@ class _LoginFormState extends State<LoginForm> {
     } catch (e) {
       print('Password Login error: $e');
       if (mounted) {
-        _showSnackBar('Network error occurred. Please try again.', Colors.red);
+        String errorMessage = 'Network error occurred. Please try again.';
+        if (e.toString().contains('token')) {
+          errorMessage = 'Login failed. Please try again.';
+        }
+        _showSnackBar(errorMessage, Colors.red);
       }
     } finally {
       if (mounted) {
@@ -437,6 +471,11 @@ class _LoginFormState extends State<LoginForm> {
                 obscureText: _obscurePassword,
                 textInputAction: TextInputAction.done,
                 enabled: !_isLoading,
+                onFieldSubmitted: (_) {
+                  if (!_isLoading) {
+                    _handlePasswordLogin();
+                  }
+                },
                 validator: (value) {
                   if (_usePasswordLogin && (value == null || value.trim().isEmpty)) {
                     return 'Please enter your password';

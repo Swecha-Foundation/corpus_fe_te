@@ -6,6 +6,7 @@ import 'dart:async';
 import '../../../constants.dart';
 import '../../../services/otp_api_service.dart';
 import '../../../services/user_api_service.dart';
+import '../../../services/token_storage_service.dart';
 import '../../Dashboard/dashboard_screen.dart';
 
 class OTPForm extends StatefulWidget {
@@ -59,11 +60,16 @@ class _OTPFormState extends State<OTPForm> {
       _resendCountdown = 60; // 60 seconds countdown
     });
     
+    _resendTimer?.cancel(); // Cancel existing timer if any
     _resendTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_resendCountdown > 0) {
-        setState(() {
-          _resendCountdown--;
-        });
+      if (mounted) {
+        if (_resendCountdown > 0) {
+          setState(() {
+            _resendCountdown--;
+          });
+        } else {
+          timer.cancel();
+        }
       } else {
         timer.cancel();
       }
@@ -76,7 +82,17 @@ class _OTPFormState extends State<OTPForm> {
         FocusScope.of(context).requestFocus(_focusNodes[index + 1]);
       } else {
         _focusNodes[index].unfocus();
+        // Auto-verify when all digits are entered
+        if (_isOTPComplete() && !_isVerifying) {
+          _verifyOTP();
+        }
       }
+    }
+  }
+  
+  void _onOTPBackspace(String value, int index) {
+    if (value.isEmpty && index > 0) {
+      FocusScope.of(context).requestFocus(_focusNodes[index - 1]);
     }
   }
   
@@ -88,98 +104,162 @@ class _OTPFormState extends State<OTPForm> {
     return _getOTPCode().length == 6;
   }
   
-  void _verifyOTP() async {
-    if (_isOTPComplete()) {
-      setState(() {
-        _isVerifying = true;
-      });
-
-      String otpCode = _getOTPCode();
-      
-      try {
-        // Verify OTP API call
-        final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
-        
-        if (result['success']) {
-          // Update last login for existing users
-          if (!widget.isNewUser && widget.userData != null) {
-            final userId = widget.userData!['id']?.toString();
-            if (userId != null) {
-              await UserApiService.updateLastLogin(userId);
-            }
-          }
-          
-          // Navigate to Dashboard after successful OTP verification
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => DashboardScreen(
-                  userName: widget.name,
-                  phoneNumber: widget.phoneNumber,
-                ),
-              ),
-            );
-          }
-        } else {
-          // Show error message
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(result['message'] ?? 'OTP verification failed'),
-                backgroundColor: Colors.red,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
-            );
-          }
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          );
-        }
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isVerifying = false;
-          });
-        }
-      }
-    } else {
+  void _showSnackBar(String message, Color backgroundColor) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Please enter complete OTP'),
-          backgroundColor: Colors.red,
+          content: Text(message),
+          backgroundColor: backgroundColor,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
+          duration: const Duration(seconds: 3),
         ),
       );
     }
   }
   
+  void _verifyOTP() async {
+    if (!_isOTPComplete()) {
+      _showSnackBar('Please enter complete OTP', Colors.red);
+      return;
+    }
+    
+    if (_isVerifying) return; // Prevent multiple calls
+    
+    setState(() {
+      _isVerifying = true;
+    });
+
+    String otpCode = _getOTPCode();
+    
+    try {
+      print('Verifying OTP: $otpCode for phone: ${widget.phoneNumber}');
+      
+      // Verify OTP API call
+      final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
+      
+      if (!mounted) return;
+      
+      if (result['success'] == true) {
+        print('OTP verification successful');
+        
+        // Handle successful OTP verification
+        if (widget.isNewUser) {
+          // For new users, OTP verification completes registration
+          _showSnackBar('Registration completed successfully!', Colors.green);
+        } else {
+          // For existing users, store authentication data if provided
+          final responseData = result['data'];
+          if (responseData != null) {
+            String? authToken = responseData['access_token']?.toString();
+            String tokenType = responseData['token_type']?.toString() ?? 'bearer';
+            
+            if (authToken != null && authToken.isNotEmpty) {
+              await TokenStorageService.storeAuthData(
+                token: authToken,
+                tokenType: tokenType,
+                userId: widget.userData?['id']?.toString(),
+                phoneNumber: widget.phoneNumber,
+                userName: widget.name,
+              );
+            }
+          }
+          
+          // Update last login for existing users
+          if (widget.userData != null) {
+            final userId = widget.userData!['id']?.toString();
+            if (userId != null) {
+              try {
+                await UserApiService.updateLastLogin(userId);
+              } catch (e) {
+                print('Failed to update last login: $e');
+                // Continue with login process even if last login update fails
+              }
+            }
+          }
+          
+          _showSnackBar('Login successful!', Colors.green);
+        }
+        
+        // Small delay to show success message
+        await Future.delayed(const Duration(milliseconds: 800));
+        
+        // Navigate to Dashboard after successful OTP verification
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DashboardScreen(
+                userName: widget.name,
+                phoneNumber: widget.phoneNumber,
+              ),
+            ),
+            (route) => false, // Remove all previous routes
+          );
+        }
+      } else {
+        // Show error message
+        String errorMessage = result['message'] ?? 'OTP verification failed';
+        
+        // Provide user-friendly error messages
+        if (errorMessage.toLowerCase().contains('invalid') ||
+            errorMessage.toLowerCase().contains('incorrect') ||
+            errorMessage.toLowerCase().contains('wrong')) {
+          errorMessage = 'Invalid OTP. Please check and try again.';
+        } else if (errorMessage.toLowerCase().contains('expired')) {
+          errorMessage = 'OTP has expired. Please request a new one.';
+        }
+        
+        _showSnackBar(errorMessage, Colors.red);
+        
+        // Clear OTP fields on error
+        for (var controller in _controllers) {
+          controller.clear();
+        }
+        // Focus on first field
+        if (mounted) {
+          FocusScope.of(context).requestFocus(_focusNodes[0]);
+        }
+      }
+    } catch (e) {
+      print('OTP verification error: $e');
+      if (mounted) {
+        _showSnackBar('Network error occurred. Please try again.', Colors.red);
+        
+        // Clear OTP fields on error
+        for (var controller in _controllers) {
+          controller.clear();
+        }
+        // Focus on first field
+        FocusScope.of(context).requestFocus(_focusNodes[0]);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVerifying = false;
+        });
+      }
+    }
+  }
+  
   void _resendOTP() async {
+    if (_isResending) return; // Prevent multiple calls
+    
     setState(() {
       _isResending = true;
     });
 
     try {
+      print('Resending OTP to: ${widget.phoneNumber}');
+      
       // Resend OTP API call
       final result = await OTPApiService.sendOTP(widget.phoneNumber);
       
-      if (result['success']) {
+      if (!mounted) return;
+      
+      if (result['success'] == true) {
         // Clear all fields
         for (var controller in _controllers) {
           controller.clear();
@@ -190,44 +270,24 @@ class _OTPFormState extends State<OTPForm> {
         // Restart countdown
         _startResendCountdown();
         
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message'] ?? 'OTP sent successfully'),
-              backgroundColor: kPrimaryColor,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          );
-        }
+        String message = result['message'] ?? 'OTP sent successfully';
+        _showSnackBar(message, Colors.green);
       } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message'] ?? 'Failed to resend OTP'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          );
+        String errorMessage = result['message'] ?? 'Failed to resend OTP';
+        String errorType = result['error'] ?? '';
+        
+        if (errorType == 'rate_limit_client_side' || errorType == 'rate_limit_server_side') {
+          int waitTime = result['waitTime'] ?? 30;
+          errorMessage = 'Please wait $waitTime seconds before requesting another OTP';
+          _showSnackBar(errorMessage, Colors.orange);
+        } else {
+          _showSnackBar(errorMessage, Colors.red);
         }
       }
     } catch (e) {
+      print('Resend OTP error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
+        _showSnackBar('Network error occurred. Please try again.', Colors.red);
       }
     } finally {
       if (mounted) {
@@ -338,7 +398,10 @@ class _OTPFormState extends State<OTPForm> {
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
                   ],
-                  onChanged: (value) => _onOTPChanged(value, index),
+                  onChanged: (value) {
+                    _onOTPChanged(value, index);
+                    _onOTPBackspace(value, index);
+                  },
                   onTap: () {
                     _controllers[index].selection = TextSelection.fromPosition(
                       TextPosition(offset: _controllers[index].text.length),

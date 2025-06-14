@@ -4,13 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../constants.dart';
+import '../../services/api_service.dart';
 
 class VideoInputScreen extends StatefulWidget {
   final String? selectedCategory;
+  final String? categoryId;
+  final String userId;
   
   const VideoInputScreen({
     Key? key,
     this.selectedCategory,
+    this.categoryId,
+    required this.userId,
   }) : super(key: key);
 
   @override
@@ -18,25 +23,33 @@ class VideoInputScreen extends StatefulWidget {
 }
 
 class _VideoInputScreenState extends State<VideoInputScreen> {
+  final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
-  List<XFile> _selectedVideos = [];
+  final List<XFile> _selectedVideos = [];
   bool _isProcessing = false;
+  bool _isUploading = false;
   String _selectedLanguage = 'Telugu';
   int _descriptionWordCount = 0;
+  int _titleWordCount = 0;
   double _totalDuration = 0.0; // In seconds
   double _totalSize = 0.0; // In MB
+  double _uploadProgress = 0.0;
+  String? _createdRecordId;
 
   @override
   void initState() {
     super.initState();
     _descriptionController.addListener(_updateDescriptionWordCount);
+    _titleController.addListener(_updateTitleWordCount);
   }
 
   @override
   void dispose() {
     _descriptionController.removeListener(_updateDescriptionWordCount);
+    _titleController.removeListener(_updateTitleWordCount);
     _descriptionController.dispose();
+    _titleController.dispose();
     super.dispose();
   }
 
@@ -44,6 +57,13 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     final text = _descriptionController.text.trim();
     setState(() {
       _descriptionWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
+    });
+  }
+
+  void _updateTitleWordCount() {
+    final text = _titleController.text.trim();
+    setState(() {
+      _titleWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
     });
   }
 
@@ -117,9 +137,14 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     _showSnackBar('Video removed', Colors.grey);
   }
 
-  void _processVideos() {
+  Future<void> _processVideos() async {
     if (_selectedVideos.isEmpty) {
       _showSnackBar('Please select at least one video', Colors.orange);
+      return;
+    }
+
+    if (_titleController.text.trim().isEmpty) {
+      _showSnackBar('Please enter a title', Colors.orange);
       return;
     }
 
@@ -127,18 +152,37 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       _isProcessing = true;
     });
 
-    // Simulate processing time (longer for videos)
-    Future.delayed(const Duration(seconds: 4), () {
+    try {
+      // First create the record
+      final recordResult = await ApiService.createRecord(
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        categoryId: widget.categoryId ?? 'default',
+        userId: widget.userId,
+        mediaType: 'video',
+      );
+
+      if (recordResult['success']) {
+        setState(() {
+          _createdRecordId = recordResult['data']['id'];
+        });
+        _showSubmitDialog();
+      } else {
+        _showSnackBar('Error creating record: ${recordResult['error']}', Colors.red);
+      }
+    } catch (e) {
+      _showSnackBar('Error: $e', Colors.red);
+    } finally {
       setState(() {
         _isProcessing = false;
       });
-      _showSubmitDialog();
-    });
+    }
   }
 
   void _showSubmitDialog() {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Submit Content'),
@@ -146,6 +190,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text('Title: ${_titleController.text.trim()}'),
               Text('Videos: ${_selectedVideos.length}'),
               Text('Total size: ${_totalSize.toStringAsFixed(1)} MB'),
               Text('Estimated duration: ${_formatDuration(_totalDuration)}'),
@@ -154,7 +199,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
               if (widget.selectedCategory != null)
                 Text('Category: ${widget.selectedCategory}'),
               const SizedBox(height: 16),
-              const Text('Are you ready to submit your content?'),
+              const Text('Record created successfully! Ready to upload videos?'),
             ],
           ),
           actions: [
@@ -165,13 +210,13 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
-                _submitContent();
+                _uploadVideos();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: kPrimaryColor,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Submit'),
+              child: const Text('Upload Videos'),
             ),
           ],
         );
@@ -179,16 +224,110 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     );
   }
 
-  void _submitContent() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Content submitted successfully! (${_selectedVideos.length} videos)'),
-        backgroundColor: Colors.green,
-        duration: const Duration(seconds: 3),
-      ),
+  Future<void> _uploadVideos() async {
+    if (_createdRecordId == null) {
+      _showSnackBar('No record ID found', Colors.red);
+      return;
+    }
+
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.0;
+    });
+
+    try {
+      int successfulUploads = 0;
+      
+      for (int i = 0; i < _selectedVideos.length; i++) {
+        final video = _selectedVideos[i];
+        final file = File(video.path);
+        
+        // Update progress
+        setState(() {
+          _uploadProgress = (i / _selectedVideos.length);
+        });
+        
+        final uploadResult = await ApiService.uploadRecord(
+          recordId: _createdRecordId!,
+          file: file,
+          description: 'Video ${i + 1} - ${_descriptionController.text.trim()}',
+        );
+        
+        if (uploadResult['success']) {
+          successfulUploads++;
+          _showSnackBar('Video ${i + 1} uploaded successfully', Colors.green);
+        } else {
+          _showSnackBar('Failed to upload video ${i + 1}: ${uploadResult['error']}', Colors.red);
+        }
+      }
+      
+      setState(() {
+        _uploadProgress = 1.0;
+      });
+      
+      // Show final result
+      if (successfulUploads == _selectedVideos.length) {
+        _showSuccessDialog();
+      } else {
+        _showSnackBar('$successfulUploads of ${_selectedVideos.length} videos uploaded', Colors.orange);
+      }
+      
+    } catch (e) {
+      _showSnackBar('Upload error: $e', Colors.red);
+    } finally {
+      setState(() {
+        _isUploading = false;
+      });
+    }
+  }
+
+  void _showSuccessDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green, size: 24),
+              SizedBox(width: 8),
+              Text('Success!'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('All ${_selectedVideos.length} videos have been uploaded successfully!'),
+              const SizedBox(height: 16),
+              Text('Record ID: $_createdRecordId'),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.pop(context, true); // Return success to parent
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kPrimaryColor,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Done'),
+            ),
+          ],
+        );
+      },
     );
-    
-    Navigator.pop(context);
+  }
+
+  Future<void> _saveDraft() async {
+    if (_titleController.text.trim().isEmpty && _selectedVideos.isEmpty) {
+      _showSnackBar('Nothing to save', Colors.orange);
+      return;
+    }
+
+    // For now, just show a message. In a real app, you might save to local storage
+    _showSnackBar('Draft saved locally', Colors.green);
   }
 
   void _showSnackBar(String message, Color color) {
@@ -207,7 +346,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Clear All'),
-          content: const Text('Are you sure you want to clear all videos and description?'),
+          content: const Text('Are you sure you want to clear all videos and text?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -218,9 +357,11 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                 Navigator.pop(context);
                 setState(() {
                   _selectedVideos.clear();
+                  _titleController.clear();
                   _descriptionController.clear();
                   _totalDuration = 0.0;
                   _totalSize = 0.0;
+                  _createdRecordId = null;
                 });
               },
               child: const Text(
@@ -266,7 +407,9 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           ),
         ),
         actions: [
-          if (_selectedVideos.isNotEmpty || _descriptionController.text.isNotEmpty)
+          if (_selectedVideos.isNotEmpty || 
+              _titleController.text.isNotEmpty || 
+              _descriptionController.text.isNotEmpty)
             IconButton(
               onPressed: _clearAll,
               icon: const Icon(Icons.clear, color: Colors.red),
@@ -357,6 +500,45 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
               ),
             ),
 
+            // Upload Progress Indicator
+            if (_isUploading) ...[
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      offset: const Offset(0, 2),
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [ 
+                        const Icon(Icons.cloud_upload, color: kPrimaryColor),
+                        const SizedBox(width: 8),
+                        const Text('Uploading videos...'),
+                        const Spacer(),
+                        Text('${(_uploadProgress * 100).toInt()}%'),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: _uploadProgress,
+                      backgroundColor: Colors.grey[200],
+                      valueColor: const AlwaysStoppedAnimation<Color>(kPrimaryColor),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
             // Main Content
             Expanded(
               child: SingleChildScrollView(
@@ -428,6 +610,78 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                       ),
                       const SizedBox(height: 16),
                     ],
+
+                    // Title Input
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            offset: const Offset(0, 2),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.title, color: kPrimaryColor),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Title *',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                'Words: $_titleWordCount',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _titleController,
+                            maxLines: 1,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              height: 1.5,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: _selectedLanguage == 'Telugu' 
+                                  ? 'మీ వీడియోకు శీర్షిక రాయండి...'
+                                  : 'Enter a title for your video...',
+                              hintStyle: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 16,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(color: Colors.grey.shade300),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: kPrimaryColor),
+                              ),
+                              contentPadding: const EdgeInsets.all(12),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
 
                     // Selected Videos List
                     if (_selectedVideos.isNotEmpty) ...[
@@ -558,23 +812,23 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                 children: [
                   // Process Button
                   GestureDetector(
-                    onTap: _isProcessing ? null : _processVideos,
+                    onTap: (_isProcessing || _isUploading) ? null : _processVideos,
                     child: Container(
                       width: 80,
                       height: 80,
                       decoration: BoxDecoration(
-                        color: _isProcessing ? Colors.grey : kPrimaryColor,
+                        color: (_isProcessing || _isUploading) ? Colors.grey : kPrimaryColor,
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: (_isProcessing ? Colors.grey : kPrimaryColor)
+                            color: ((_isProcessing || _isUploading) ? Colors.grey : kPrimaryColor)
                                 .withOpacity(0.3),
                             offset: const Offset(0, 4),
                             blurRadius: 12,
                           ),
                         ],
                       ),
-                      child: _isProcessing
+                      child: (_isProcessing || _isUploading)
                           ? const CircularProgressIndicator(
                               color: Colors.white,
                               strokeWidth: 3,
@@ -588,7 +842,8 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    _isProcessing ? 'Processing videos...' : 'Tap to process & submit',
+                    _isUploading ? 'Uploading videos...' :
+                    _isProcessing ? 'Creating record...' : 'Tap to process & submit',
                     style: const TextStyle(
                       fontSize: 16,
                       color: Colors.grey,
@@ -604,7 +859,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                       _buildActionButton(
                         icon: Icons.save_outlined,
                         label: 'Save Draft',
-                        onTap: () => _showSnackBar('Draft saved successfully', Colors.green),
+                        onTap: _saveDraft,
                       ),
                       _buildActionButton(
                         icon: Icons.auto_awesome,
@@ -705,10 +960,11 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
             color: kPrimaryColor,
           ),
         ),
+        const SizedBox(height: 2),
         Text(
           label,
           style: const TextStyle(
-            fontSize: 12,
+            fontSize: 11,
             color: Colors.grey,
           ),
         ),
@@ -718,53 +974,52 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
 
   Widget _buildVideoItem(int index) {
     final video = _selectedVideos[index];
-    final file = File(video.path);
+    final fileName = video.path.split('/').last;
     
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
+        color: Colors.grey.shade50,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
+        border: Border.all(color: Colors.grey.shade200),
       ),
       child: Row(
         children: [
-          // Video Thumbnail Placeholder
           Container(
-            width: 60,
-            height: 45,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: kPrimaryColor.withOpacity(0.1),
               borderRadius: BorderRadius.circular(6),
             ),
             child: const Icon(
-              Icons.play_circle_filled,
+              Icons.play_arrow,
               color: kPrimaryColor,
-              size: 24,
+              size: 20,
             ),
           ),
           const SizedBox(width: 12),
-          
-          // Video Info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Video ${index + 1}',
+                  fileName,
                   style: const TextStyle(
                     fontSize: 14,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 FutureBuilder<int>(
-                  future: file.length(),
+                  future: File(video.path).length(),
                   builder: (context, snapshot) {
                     if (snapshot.hasData) {
                       final sizeInMB = snapshot.data! / (1024 * 1024);
                       return Text(
-                        '${_formatFileSize(sizeInMB)} • 30s', // Placeholder duration
+                        _formatFileSize(sizeInMB),
                         style: const TextStyle(
                           fontSize: 12,
                           color: Colors.grey,
@@ -772,7 +1027,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                       );
                     }
                     return const Text(
-                      'Loading...',
+                      'Calculating size...',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey,
@@ -783,21 +1038,12 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
               ],
             ),
           ),
-          
-          // Remove Button
-          GestureDetector(
-            onTap: () => _removeVideo(index),
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.close,
-                color: Colors.white,
-                size: 16,
-              ),
+          IconButton(
+            onPressed: () => _removeVideo(index),
+            icon: const Icon(
+              Icons.close,
+              color: Colors.red,
+              size: 20,
             ),
           ),
         ],
@@ -815,12 +1061,12 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       child: Column(
         children: [
           Container(
-            width: 50,
-            height: 50,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
-              color: Colors.grey[100],
+              color: Colors.white,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
+              border: Border.all(color: Colors.grey.shade300),
             ),
             child: Icon(
               icon,
@@ -831,7 +1077,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           const SizedBox(height: 8),
           Text(
             label,
-           style: const TextStyle(
+            style: const TextStyle(
               fontSize: 12,
               color: Colors.grey,
             ),

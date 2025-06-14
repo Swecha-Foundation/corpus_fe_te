@@ -1,4 +1,3 @@
-// Screens/InputMethod/input_method_screen.dart
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
@@ -13,9 +12,9 @@ class InputMethodScreen extends StatefulWidget {
   final String selectedCategory;
   
   const InputMethodScreen({
-    Key? key,
+    super.key,
     required this.selectedCategory,
-  }) : super(key: key);
+  });
 
   @override
   State<InputMethodScreen> createState() => _InputMethodScreenState();
@@ -108,11 +107,11 @@ class _InputMethodScreenState extends State<InputMethodScreen>
 
   void _handleVideoInput() {
     _showSnackBar('Opening video recording for ${widget.selectedCategory}...', Icons.videocam, const Color(0xFF9C27B0));
-      Navigator.push(
+    Navigator.push(
       context,
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => VideoInputScreen(
-          selectedCategory: widget.selectedCategory,
+          selectedCategory: widget.selectedCategory, userId: '',
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
@@ -130,7 +129,6 @@ class _InputMethodScreenState extends State<InputMethodScreen>
     );
   }
   
-
   void _handlePictureInput() {
     Navigator.push(
       context,
@@ -154,8 +152,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
     );
   }
 
-
   void _showSnackBar(String message, IconData icon, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(

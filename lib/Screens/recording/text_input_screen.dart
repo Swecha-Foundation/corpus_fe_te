@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use, use_build_context_synchronously
+
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
@@ -27,7 +29,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
   // API related variables
   File? _textFile;
   String _userId =
-      'user123'; // Replace with actual user ID from your auth system
+      'user123'; 
 
   @override
   void initState() {

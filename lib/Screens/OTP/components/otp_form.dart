@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +7,7 @@ import '../../../constants.dart';
 import '../../../services/otp_api_service.dart';
 import '../../../services/user_api_service.dart';
 import '../../../services/token_storage_service.dart';
+import '../../../services/auth_service.dart';
 import '../../Dashboard/dashboard_screen.dart';
 
 class OTPForm extends StatefulWidget {
@@ -120,129 +121,163 @@ class _OTPFormState extends State<OTPForm> {
     }
   }
   
-  void _verifyOTP() async {
-    if (!_isOTPComplete()) {
-      _showSnackBar('Please enter complete OTP', Colors.red);
-      return;
-    }
-    
-    if (_isVerifying) return; // Prevent multiple calls
-    
-    setState(() {
-      _isVerifying = true;
-    });
+  // Updated _verifyOTP method for otp_form.dart
 
-    String otpCode = _getOTPCode();
+void _verifyOTP() async {
+  if (!_isOTPComplete()) {
+    _showSnackBar('Please enter complete OTP', Colors.red);
+    return;
+  }
+  
+  if (_isVerifying) return; // Prevent multiple calls
+  
+  setState(() {
+    _isVerifying = true;
+  });
+
+  String otpCode = _getOTPCode();
+  
+  try {
+    print('Verifying OTP: $otpCode for phone: ${widget.phoneNumber}');
     
-    try {
-      print('Verifying OTP: $otpCode for phone: ${widget.phoneNumber}');
+    // Verify OTP API call
+    final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
+    
+    if (!mounted) return;
+    
+    if (result['success'] == true) {
+      print('OTP verification successful');
       
-      // Verify OTP API call
-      final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
-      
-      if (!mounted) return;
-      
-      if (result['success'] == true) {
-        print('OTP verification successful');
+      // Extract token data from response
+      final responseData = result['data'];
+      if (responseData != null) {
+        String? accessToken = responseData['access_token']?.toString();
+        String tokenType = responseData['token_type']?.toString() ?? 'bearer';
+        String? refreshToken = responseData['refresh_token']?.toString();
         
-        // Handle successful OTP verification
-        if (widget.isNewUser) {
-          // For new users, OTP verification completes registration
-          _showSnackBar('Registration completed successfully!', Colors.green);
-        } else {
-          // For existing users, store authentication data if provided
-          final responseData = result['data'];
-          if (responseData != null) {
-            String? authToken = responseData['access_token']?.toString();
-            String tokenType = responseData['token_type']?.toString() ?? 'bearer';
-            
-            if (authToken != null && authToken.isNotEmpty) {
-              await TokenStorageService.storeAuthData(
-                token: authToken,
-                tokenType: tokenType,
-                userId: widget.userData?['id']?.toString(),
-                phoneNumber: widget.phoneNumber,
-                userName: widget.name,
-              );
-            }
-          }
-          
-          // Update last login for existing users
-          if (widget.userData != null) {
-            final userId = widget.userData!['id']?.toString();
-            if (userId != null) {
-              try {
-                await UserApiService.updateLastLogin(userId);
-              } catch (e) {
-                print('Failed to update last login: $e');
-                // Continue with login process even if last login update fails
-              }
-            }
-          }
-          
-          _showSnackBar('Login successful!', Colors.green);
-        }
+        print('=== Token Information ===');
+        print('Access Token: ${accessToken?.substring(0, 20)}...');
+        print('Token Type: $tokenType');
+        print('Refresh Token: ${refreshToken?.substring(0, 20) ?? 'None'}...');
         
-        // Small delay to show success message
-        await Future.delayed(const Duration(milliseconds: 800));
-        
-        // Navigate to Dashboard after successful OTP verification
-        if (mounted) {
-          Navigator.pushAndRemoveUntil(
-            context,
-            MaterialPageRoute(
-              builder: (context) => DashboardScreen(
-                userName: widget.name,
-                phoneNumber: widget.phoneNumber,
-              ),
-            ),
-            (route) => false, // Remove all previous routes
+        if (accessToken != null && accessToken.isNotEmpty) {
+          // Store authentication data
+          final stored = await TokenStorageService.storeAuthData(
+            token: accessToken,
+            tokenType: tokenType,
+            userId: widget.userData?['id']?.toString() ?? responseData['user_id']?.toString(),
+            phoneNumber: widget.phoneNumber,
+            userName: widget.name,
+            refreshToken: refreshToken,
+            // Token expires in 24 hours by default
+            expiryTime: DateTime.now().add(const Duration(hours: 24)),
           );
-        }
-      } else {
-        // Show error message
-        String errorMessage = result['message'] ?? 'OTP verification failed';
-        
-        // Provide user-friendly error messages
-        if (errorMessage.toLowerCase().contains('invalid') ||
-            errorMessage.toLowerCase().contains('incorrect') ||
-            errorMessage.toLowerCase().contains('wrong')) {
-          errorMessage = 'Invalid OTP. Please check and try again.';
-        } else if (errorMessage.toLowerCase().contains('expired')) {
-          errorMessage = 'OTP has expired. Please request a new one.';
-        }
-        
-        _showSnackBar(errorMessage, Colors.red);
-        
-        // Clear OTP fields on error
-        for (var controller in _controllers) {
-          controller.clear();
-        }
-        // Focus on first field
-        if (mounted) {
-          FocusScope.of(context).requestFocus(_focusNodes[0]);
+          
+          if (stored) {
+            print('✅ Token stored successfully');
+            
+            // Debug: Print stored auth data
+            await TokenStorageService.debugPrintAuthData();
+            
+            // Debug: Get token for manual testing
+            final testToken = await ApiService.getTokenForTesting();
+            if (testToken != null) {
+              print('\n🔑 Copy this token to authorize in Swagger UI:');
+              print('Bearer $testToken');
+              print('\n📋 Steps to authorize:');
+              print('1. Go to https://backend2.swecha.org/docs#');
+              print('2. Click the "Authorize" button (🔒)');
+              print('3. Paste: Bearer $testToken');
+              print('4. Click "Authorize"');
+            }
+          } else {
+            print('❌ Failed to store token');
+          }
+        } else {
+          print('⚠️ No access token received in response');
         }
       }
-    } catch (e) {
-      print('OTP verification error: $e');
-      if (mounted) {
-        _showSnackBar('Network error occurred. Please try again.', Colors.red);
-        
-        // Clear OTP fields on error
-        for (var controller in _controllers) {
-          controller.clear();
+      
+      // Handle successful OTP verification
+      if (widget.isNewUser) {
+        _showSnackBar('Registration completed successfully!', Colors.green);
+      } else {
+        // Update last login for existing users
+        if (widget.userData != null) {
+          final userId = widget.userData!['id']?.toString();
+          if (userId != null) {
+            try {
+              await UserApiService.updateLastLogin(userId);
+            } catch (e) {
+              print('Failed to update last login: $e');
+              // Continue with login process even if last login update fails
+            }
+          }
         }
-        // Focus on first field
+        
+        _showSnackBar('Login successful!', Colors.green);
+      }
+      
+      // Small delay to show success message
+      await Future.delayed(const Duration(milliseconds: 800));
+      
+      // Navigate to Dashboard after successful OTP verification
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(
+            builder: (context) => DashboardScreen(
+              userName: widget.name,
+              phoneNumber: widget.phoneNumber,
+            ),
+          ),
+          (route) => false, // Remove all previous routes
+        );
+      }
+    } else {
+      // Show error message
+      String errorMessage = result['message'] ?? 'OTP verification failed';
+      
+      // Provide user-friendly error messages
+      if (errorMessage.toLowerCase().contains('invalid') ||
+          errorMessage.toLowerCase().contains('incorrect') ||
+          errorMessage.toLowerCase().contains('wrong')) {
+        errorMessage = 'Invalid OTP. Please check and try again.';
+      } else if (errorMessage.toLowerCase().contains('expired')) {
+        errorMessage = 'OTP has expired. Please request a new one.';
+      }
+      
+      _showSnackBar(errorMessage, Colors.red);
+      
+      // Clear OTP fields on error
+      for (var controller in _controllers) {
+        controller.clear();
+      }
+      // Focus on first field
+      if (mounted) {
         FocusScope.of(context).requestFocus(_focusNodes[0]);
       }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isVerifying = false;
-        });
+    }
+  } catch (e) {
+    print('OTP verification error: $e');
+    if (mounted) {
+      _showSnackBar('Network error occurred. Please try again.', Colors.red);
+      
+      // Clear OTP fields on error
+      for (var controller in _controllers) {
+        controller.clear();
       }
+      // Focus on first field
+      FocusScope.of(context).requestFocus(_focusNodes[0]);
+    }
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isVerifying = false;
+      });
     }
   }
+}
   
   void _resendOTP() async {
     if (_isResending) return; // Prevent multiple calls

@@ -1,6 +1,9 @@
 // Screens/Dashboard/components/category_grid.dart
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import '../../../constants.dart';
+import '../../../services/category_api_service.dart'; // Import your API helper
 
 class CategoryGrid extends StatefulWidget {
   final String? selectedCategory;
@@ -19,6 +22,69 @@ class CategoryGrid extends StatefulWidget {
 class _CategoryGridState extends State<CategoryGrid> 
     with TickerProviderStateMixin {
   late AnimationController _animationController;
+  List<CategoryItem> categories = [];
+  bool isLoading = true;
+  String? errorMessage;
+
+  // Map of category names to their icons and gradients
+  final Map<String, Map<String, dynamic>> categoryMapping = {
+    'fables': {
+      'icon': '📚',
+      'gradient': [const Color(0xFF667eea), const Color(0xFF764ba2)],
+    },
+    'events': {
+      'icon': '🎉',
+      'gradient': [const Color(0xFFf093fb), const Color(0xFFf5576c)],
+    },
+    'music': {
+      'icon': '🎵',
+      'gradient': [const Color(0xFF4facfe), const Color(0xFF00f2fe)],
+    },
+    'places': {
+      'icon': '📍',
+      'gradient': [const Color(0xFF43e97b), const Color(0xFF38f9d7)],
+    },
+    'food': {
+      'icon': '🍕',
+      'gradient': [const Color(0xFFfa709a), const Color(0xFFfee140)],
+    },
+    'people': {
+      'icon': '👥',
+      'gradient': [const Color(0xFFa8edea), const Color(0xFFfed6e3)],
+    },
+    'literature': {
+      'icon': '📖',
+      'gradient': [const Color(0xFFffecd2), const Color(0xFFfcb69f)],
+    },
+    'architecture': {
+      'icon': '🏛️',
+      'gradient': [const Color(0xFFa18cd1), const Color(0xFFfbc2eb)],
+    },
+    'skills': {
+      'icon': '🎯',
+      'gradient': [const Color(0xFF6a11cb), const Color(0xFF2575fc)],
+    },
+    'images': {
+      'icon': '🖼️',
+      'gradient': [const Color(0xFFfad0c4), const Color(0xFFfad0c4)],
+    },
+    'culture': {
+      'icon': '🎭',
+      'gradient': [const Color(0xFFa1c4fd), const Color(0xFFc2e9fb)],
+    },
+    'flora_&_fauna': {
+      'icon': '🌸',
+      'gradient': [const Color(0xFFffecd2), const Color(0xFFfcb69f)],
+    },
+    'education': {
+      'icon': '🎓',
+      'gradient': [const Color(0xFF89f7fe), const Color(0xFF66a6ff)],
+    },
+    'vegetation': {
+      'icon': '🌿',
+      'gradient': [const Color(0xFF85ffbd), const Color(0xFFfffb7d)],
+    },
+  };
 
   @override
   void initState() {
@@ -27,7 +93,52 @@ class _CategoryGridState extends State<CategoryGrid>
       duration: const Duration(milliseconds: 1200),
       vsync: this,
     );
-    _animationController.forward();
+    _fetchCategories();
+  }
+
+  Future<void> _fetchCategories() async {
+    try {
+      final result = await ApiHelper.getCategories();
+      
+      if (result['success']) {
+        final List<dynamic> categoriesData = result['data'];
+        
+        setState(() {
+          categories = categoriesData.map((categoryData) {
+            final String name = categoryData['name'] ?? '';
+            final String title = categoryData['title'] ?? name;
+            
+            // Get icon and gradient from mapping, or use defaults
+            final mapping = categoryMapping[name] ?? {
+              'icon': '📋',
+              'gradient': [const Color(0xFF667eea), const Color(0xFF764ba2)],
+            };
+            
+            return CategoryItem(
+              icon: mapping['icon'],
+              title: title,
+              gradient: _createGradient(mapping['gradient']),
+            );
+          }).toList();
+          
+          isLoading = false;
+          errorMessage = null;
+        });
+        
+        // Start animation after categories are loaded
+        _animationController.forward();
+      } else {
+        setState(() {
+          isLoading = false;
+          errorMessage = result['message'] ?? 'Failed to load categories';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+        errorMessage = 'An error occurred while loading categories';
+      });
+    }
   }
 
   @override
@@ -38,21 +149,6 @@ class _CategoryGridState extends State<CategoryGrid>
 
   @override
   Widget build(BuildContext context) {
-    final categories = [
-      CategoryItem(icon: '📚', title: 'Fables', gradient: _createGradient([const Color(0xFF667eea), const Color(0xFF764ba2)])),
-      CategoryItem(icon: '🎉', title: 'Events', gradient: _createGradient([const Color(0xFFf093fb), const Color(0xFFf5576c)])),
-      CategoryItem(icon: '🎵', title: 'Music', gradient: _createGradient([const Color(0xFF4facfe), const Color(0xFF00f2fe)])),
-      CategoryItem(icon: '📍', title: 'Places', gradient: _createGradient([const Color(0xFF43e97b), const Color(0xFF38f9d7)])),
-      CategoryItem(icon: '🍕', title: 'Food', gradient: _createGradient([const Color(0xFFfa709a), const Color(0xFFfee140)])),
-      CategoryItem(icon: '👥', title: 'People', gradient: _createGradient([const Color(0xFFa8edea), const Color(0xFFfed6e3)])),
-      CategoryItem(icon: '📖', title: 'Literature', gradient: _createGradient([const Color(0xFFffecd2), const Color(0xFFfcb69f)])),
-      CategoryItem(icon: '🏛️', title: 'Architecture', gradient: _createGradient([const Color(0xFFa18cd1), const Color(0xFFfbc2eb)])),
-      CategoryItem(icon: '🎯', title: 'Skills', gradient: _createGradient([const Color(0xFF6a11cb), const Color(0xFF2575fc)])),
-      CategoryItem(icon: '🖼️', title: 'Images', gradient: _createGradient([const Color(0xFFfad0c4), const Color(0xFFfad0c4)])),
-      CategoryItem(icon: '🎭', title: 'Culture', gradient: _createGradient([const Color(0xFFa1c4fd), const Color(0xFFc2e9fb)])),
-      CategoryItem(icon: '🌸', title: 'Flora & fauna', gradient: _createGradient([const Color(0xFFffecd2), const Color(0xFFfcb69f)])),
-    ];
-
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -66,7 +162,6 @@ class _CategoryGridState extends State<CategoryGrid>
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            // ignore: deprecated_member_use
             color: Colors.black.withOpacity(0.05),
             offset: const Offset(0, 10),
             blurRadius: 30,
@@ -83,7 +178,6 @@ class _CategoryGridState extends State<CategoryGrid>
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    // ignore: deprecated_member_use
                     colors: [kPrimaryColor.withOpacity(0.1), kPrimaryColor.withOpacity(0.05)],
                   ),
                   borderRadius: BorderRadius.circular(20),
@@ -118,60 +212,115 @@ class _CategoryGridState extends State<CategoryGrid>
             ],
           ),
           const SizedBox(height: 20),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 0.9,
-            ),
-            itemCount: categories.length,
-            itemBuilder: (context, index) {
-              return AnimatedBuilder(
-                animation: _animationController,
-                builder: (context, child) {
-                  final animationDelay = index * 0.1;
-                  final slideAnimation = Tween<Offset>(
-                    begin: const Offset(0, 0.5),
-                    end: Offset.zero,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: _animationController,
-                      curve: Interval(
-                        animationDelay,
-                        1.0,
-                        curve: Curves.easeOutCubic,
-                      ),
+          
+          // Loading state
+          if (isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(40.0),
+                child: CircularProgressIndicator(
+                  color: kPrimaryColor,
+                ),
+              ),
+            )
+          
+          // Error state
+          else if (errorMessage != null)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      color: Colors.red,
+                      size: 48,
                     ),
-                  );
-                  
-                  final fadeAnimation = Tween<double>(
-                    begin: 0.0,
-                    end: 1.0,
-                  ).animate(
-                    CurvedAnimation(
-                      parent: _animationController,
-                      curve: Interval(
-                        animationDelay,
-                        1.0,
-                        curve: Curves.easeOut,
+                    const SizedBox(height: 16),
+                    Text(
+                      errorMessage!,
+                      style: const TextStyle(
+                        color: Colors.red,
+                        fontSize: 16,
                       ),
+                      textAlign: TextAlign.center,
                     ),
-                  );
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          isLoading = true;
+                          errorMessage = null;
+                        });
+                        _fetchCategories();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kPrimaryColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          
+          // Categories grid
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.9,
+              ),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                return AnimatedBuilder(
+                  animation: _animationController,
+                  builder: (context, child) {
+                    final animationDelay = index * 0.1;
+                    final slideAnimation = Tween<Offset>(
+                      begin: const Offset(0, 0.5),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: _animationController,
+                        curve: Interval(
+                          animationDelay,
+                          1.0,
+                          curve: Curves.easeOutCubic,
+                        ),
+                      ),
+                    );
+                    
+                    final fadeAnimation = Tween<double>(
+                      begin: 0.0,
+                      end: 1.0,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: _animationController,
+                        curve: Interval(
+                          animationDelay,
+                          1.0,
+                          curve: Curves.easeOut,
+                        ),
+                      ),
+                    );
 
-                  return SlideTransition(
-                    position: slideAnimation,
-                    child: FadeTransition(
-                      opacity: fadeAnimation,
-                      child: _buildCategoryTile(context, categories[index]),
-                    ),
-                  );
-                },
-              );
-            },
-          ),
+                    return SlideTransition(
+                      position: slideAnimation,
+                      child: FadeTransition(
+                        opacity: fadeAnimation,
+                        child: _buildCategoryTile(context, categories[index]),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
         ],
       ),
     );
@@ -229,9 +378,7 @@ class _CategoryGridState extends State<CategoryGrid>
           boxShadow: [
             BoxShadow(
               color: isSelected 
-                // ignore: deprecated_member_use
                 ? kPrimaryColor.withOpacity(0.3)
-                // ignore: deprecated_member_use
                 : Colors.black.withOpacity(0.1),
               offset: const Offset(0, 8),
               blurRadius: isSelected ? 20 : 15,
@@ -248,9 +395,7 @@ class _CategoryGridState extends State<CategoryGrid>
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                // ignore: deprecated_member_use
                 Colors.white.withOpacity(0.2),
-                // ignore: deprecated_member_use
                 Colors.white.withOpacity(0.05),
               ],
             ),
@@ -261,7 +406,6 @@ class _CategoryGridState extends State<CategoryGrid>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  // ignore: deprecated_member_use
                   color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),

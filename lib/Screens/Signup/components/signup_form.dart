@@ -37,6 +37,11 @@ class _SignUpFormState extends State<SignUpForm> {
 
   final List<String> _genderOptions = ['Male', 'Female', 'Other'];
 
+  // Helper method to get full phone number with country code
+  String _getFullPhoneNumber() {
+    return '+91${_phoneController.text.trim()}';
+  }
+
   @override
   void dispose() {
     _phoneController.dispose();
@@ -97,9 +102,9 @@ class _SignUpFormState extends State<SignUpForm> {
 
   // Check if user exists when phone number field loses focus
   void _checkIfUserExists() async {
-    String phoneNumber = _phoneController.text.trim();
+    String phoneNumber = _getFullPhoneNumber(); // Use full number with +91
     
-    if (phoneNumber.length == 10) {
+    if (_phoneController.text.trim().length == 10) {
       setState(() {
         _isCheckingUser = true;
       });
@@ -153,7 +158,7 @@ class _SignUpFormState extends State<SignUpForm> {
       _isLoading = true;
     });
 
-    String phoneNumber = _phoneController.text.trim();
+    String phoneNumber = _getFullPhoneNumber(); 
     String name = _nameController.text.trim();
     String email = _emailController.text.trim();
     String place = _placeController.text.trim();
@@ -299,6 +304,7 @@ class _SignUpFormState extends State<SignUpForm> {
     Function(String)? onChanged,
     Widget? suffixIcon,
     int? maxLength,
+    Widget? prefixIcon,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -326,7 +332,7 @@ class _SignUpFormState extends State<SignUpForm> {
             onChanged: onChanged,
             decoration: InputDecoration(
               hintText: hint,
-              prefixIcon: Icon(
+              prefixIcon: prefixIcon ?? Icon(
                 icon,
                 color: kPrimaryColor,
               ),
@@ -429,7 +435,7 @@ class _SignUpFormState extends State<SignUpForm> {
             
             const SizedBox(height: defaultPadding),
             
-            // Phone Number Field
+            // Phone Number Field with +91 prefix
             _buildInputField(
               controller: _phoneController,
               label: "Phone Number",
@@ -458,6 +464,34 @@ class _SignUpFormState extends State<SignUpForm> {
                   });
                 }
               },
+              prefixIcon: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.phone_outlined,
+                      color: kPrimaryColor,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '+91',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Container(
+                      width: 1,
+                      height: 20,
+                      color: Colors.grey[400],
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
               suffixIcon: _isCheckingUser 
                   ? const SizedBox(
                       width: 20,

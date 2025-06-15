@@ -7,10 +7,26 @@ import 'dart:async';
 class OTPApiService {
   static const String baseUrl = 'https://backend2.swecha.org/api/v1/auth';
   static const Duration timeoutDuration = Duration(seconds: 30);
+  static const String countryCode = '+91'; 
   
   // Rate limiting variables
   static DateTime? _lastOTPRequestTime;
   static const int _minIntervalSeconds = 30; // 30 seconds between OTP requests
+  
+  static String _formatPhoneNumber(String phoneNumber) {
+    String cleanedNumber = phoneNumber.replaceAll(RegExp(r'[^\d]'), '');
+    
+    if (cleanedNumber.startsWith('91') && cleanedNumber.length == 12) {
+      cleanedNumber = cleanedNumber.substring(2);
+    }
+    
+    if (cleanedNumber.length == 10) {
+      return '$countryCode$cleanedNumber';
+    }
+    
+    // This will let the server handle validation
+    return '$countryCode$cleanedNumber';
+  }
   
   // Check if enough time has passed since last OTP request
   static bool _canSendOTP() {
@@ -31,6 +47,9 @@ class OTPApiService {
   
   // Send OTP with improved rate limiting and error handling
   static Future<Map<String, dynamic>> sendOTP(String phoneNumber) async {
+    // Format phone number with +91 prefix
+    final formattedPhoneNumber = _formatPhoneNumber(phoneNumber);
+    
     // Client-side rate limiting check
     if (!_canSendOTP()) {
       int secondsLeft = _getSecondsUntilNextOTP();
@@ -43,7 +62,7 @@ class OTPApiService {
     }
     
     try {
-      print('Sending OTP to: $phoneNumber');
+      print('Sending OTP to: $formattedPhoneNumber (original: $phoneNumber)');
       
       final response = await http.post(
         Uri.parse('$baseUrl/send-otp'),
@@ -52,7 +71,7 @@ class OTPApiService {
           'Accept': 'application/json',
         },
         body: jsonEncode({
-          'phone_number': phoneNumber,
+          'phone_number': formattedPhoneNumber,
         }),
       ).timeout(timeoutDuration);
       
@@ -65,7 +84,8 @@ class OTPApiService {
         return {
           'success': true,
           'data': responseData,
-          'message': responseData['message'] ?? 'OTP sent successfully'
+          'message': responseData['message'] ?? 'OTP sent successfully',
+          'formattedPhoneNumber': formattedPhoneNumber
         };
       } else if (response.statusCode == 429) {
         // Server-side rate limiting
@@ -107,6 +127,13 @@ class OTPApiService {
         'message': 'Request timed out. Please check your internet connection and try again.',
         'error': 'timeout'
       };
+    } on http.ClientException catch (e) {
+      print('Send OTP Client Error: $e');
+      return {
+        'success': false,
+        'message': 'Network connection error. Please check your internet connection.',
+        'error': 'network_error'
+      };
     } catch (e) {
       print('Send OTP Error: $e');
       return {
@@ -119,8 +146,28 @@ class OTPApiService {
   
   // Verify OTP with improved error handling
   static Future<Map<String, dynamic>> verifyOTP(String phoneNumber, String otpCode) async {
+    // Input validation
+    if (phoneNumber.isEmpty) {
+      return {
+        'success': false,
+        'message': 'Phone number is required',
+        'error': 'invalid_input'
+      };
+    }
+    
+    if (otpCode.isEmpty || otpCode.length < 4) {
+      return {
+        'success': false,
+        'message': 'Please enter a valid OTP',
+        'error': 'invalid_otp_format'
+      };
+    }
+    
+    // Format phone number with +91 prefix
+    final formattedPhoneNumber = _formatPhoneNumber(phoneNumber);
+    
     try {
-      print('Verifying OTP for: $phoneNumber with code: $otpCode');
+      print('Verifying OTP for: $formattedPhoneNumber (original: $phoneNumber) with code: $otpCode');
       
       final response = await http.post(
         Uri.parse('$baseUrl/verify-otp'),
@@ -129,8 +176,8 @@ class OTPApiService {
           'Accept': 'application/json',
         },
         body: jsonEncode({
-          'phone_number': phoneNumber,
-          'otp_code': otpCode,
+          'phone_number': formattedPhoneNumber,
+          'otp_code': otpCode.trim(),
           'has_given_consent': true,
         }),
       ).timeout(timeoutDuration);
@@ -143,7 +190,8 @@ class OTPApiService {
         return {
           'success': true,
           'data': responseData,
-          'message': responseData['message'] ?? 'OTP verified successfully'
+          'message': responseData['message'] ?? 'OTP verified successfully',
+          'formattedPhoneNumber': formattedPhoneNumber
         };
       } else if (response.statusCode == 400) {
         final errorData = _parseResponse(response.body);
@@ -156,7 +204,13 @@ class OTPApiService {
         return {
           'success': false,
           'message': errorMessage,
-          'error': errorData
+          'error': 'invalid_otp'
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'User not found. Please sign up first.',
+          'error': 'user_not_found'
         };
       } else {
         final errorData = _parseResponse(response.body);
@@ -172,6 +226,13 @@ class OTPApiService {
         'message': 'Request timed out. Please check your internet connection and try again.',
         'error': 'timeout'
       };
+    } on http.ClientException catch (e) {
+      print('Verify OTP Client Error: $e');
+      return {
+        'success': false,
+        'message': 'Network connection error. Please check your internet connection.',
+        'error': 'network_error'
+      };
     } catch (e) {
       print('Verify OTP Error: $e');
       return {
@@ -184,6 +245,18 @@ class OTPApiService {
   
   // Resend OTP with improved rate limiting
   static Future<Map<String, dynamic>> resendOTP(String phoneNumber) async {
+    // Input validation
+    if (phoneNumber.isEmpty) {
+      return {
+        'success': false,
+        'message': 'Phone number is required',
+        'error': 'invalid_input'
+      };
+    }
+    
+    // Format phone number with +91 prefix
+    final formattedPhoneNumber = _formatPhoneNumber(phoneNumber);
+    
     // Use the same rate limiting as sendOTP
     if (!_canSendOTP()) {
       int secondsLeft = _getSecondsUntilNextOTP();
@@ -196,7 +269,7 @@ class OTPApiService {
     }
     
     try {
-      print('Resending OTP to: $phoneNumber');
+      print('Resending OTP to: $formattedPhoneNumber (original: $phoneNumber)');
       
       final response = await http.post(
         Uri.parse('$baseUrl/resend-otp'),
@@ -205,7 +278,7 @@ class OTPApiService {
           'Accept': 'application/json',
         },
         body: jsonEncode({
-          'phone_number': phoneNumber,
+          'phone_number': formattedPhoneNumber,
         }),
       ).timeout(timeoutDuration);
       
@@ -218,7 +291,8 @@ class OTPApiService {
         return {
           'success': true,
           'data': responseData,
-          'message': responseData['message'] ?? 'OTP resent successfully'
+          'message': responseData['message'] ?? 'OTP resent successfully',
+          'formattedPhoneNumber': formattedPhoneNumber
         };
       } else if (response.statusCode == 429) {
         final errorData = _parseResponse(response.body);
@@ -227,6 +301,12 @@ class OTPApiService {
           'message': 'Too many requests. Please wait before trying again.',
           'error': 'rate_limit_server_side',
           'details': errorData
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'User not found. Please sign up first.',
+          'error': 'user_not_found'
         };
       } else {
         final errorData = _parseResponse(response.body);
@@ -241,6 +321,13 @@ class OTPApiService {
         'success': false,
         'message': 'Request timed out. Please check your internet connection and try again.',
         'error': 'timeout'
+      };
+    } on http.ClientException catch (e) {
+      print('Resend OTP Client Error: $e');
+      return {
+        'success': false,
+        'message': 'Network connection error. Please check your internet connection.',
+        'error': 'network_error'
       };
     } catch (e) {
       print('Resend OTP Error: $e');
@@ -262,6 +349,16 @@ class OTPApiService {
     return _canSendOTP();
   }
   
+  // Get formatted phone number (useful for displaying to user)
+  static String getFormattedPhoneNumber(String phoneNumber) {
+    return _formatPhoneNumber(phoneNumber);
+  }
+  
+  // Reset rate limiting (useful for testing or manual reset)
+  static void resetRateLimit() {
+    _lastOTPRequestTime = null;
+  }
+  
   // Helper method to safely parse JSON responses
   static Map<String, dynamic> _parseResponse(String responseBody) {
     try {
@@ -271,6 +368,7 @@ class OTPApiService {
       }
       return {'message': 'Unexpected response format', 'raw': decoded};
     } catch (e) {
+      print('JSON Parse Error: $e');
       return {'message': 'Failed to parse response', 'raw': responseBody};
     }
   }
@@ -282,7 +380,8 @@ class OTPApiService {
            message.contains('does not exist') ||
            message.contains('user does not exist') ||
            message.contains('no user found') ||
-           message.contains('user not registered');
+           message.contains('user not registered') ||
+           message.contains('not found');
   }
   
   // Helper method to check if error indicates invalid OTP
@@ -292,6 +391,7 @@ class OTPApiService {
            message.contains('incorrect otp') ||
            message.contains('expired otp') ||
            message.contains('otp expired') ||
-           message.contains('wrong otp');
+           message.contains('wrong otp') ||
+           message.contains('otp not found');
   }
 }

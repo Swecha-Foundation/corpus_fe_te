@@ -35,6 +35,14 @@ class _LoginFormState extends State<LoginForm> {
     super.dispose();
   }
 
+  String _formatPhoneNumber(String phoneNumber) {
+    String cleanNumber = phoneNumber.trim();
+    if (cleanNumber.startsWith('+91')) {
+      return cleanNumber;
+    }
+    return '+91$cleanNumber';
+  }
+
   void _showSnackBar(String message, Color backgroundColor, {SnackBarAction? action}) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -60,7 +68,7 @@ class _LoginFormState extends State<LoginForm> {
       _isLoading = true;
     });
 
-    String phoneNumber = _phoneController.text.trim();
+    String phoneNumber = _formatPhoneNumber(_phoneController.text.trim());
     
     try {
       print('Attempting OTP login for phone: $phoneNumber');
@@ -159,7 +167,7 @@ class _LoginFormState extends State<LoginForm> {
       _isLoading = true;
     });
 
-    String phoneNumber = _phoneController.text.trim();
+    String phoneNumber = _formatPhoneNumber(_phoneController.text.trim());
     String password = _passwordController.text.trim();
     
     try {

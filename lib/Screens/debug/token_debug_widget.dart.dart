@@ -1,4 +1,6 @@
 // token_debug_widget.dart
+// ignore_for_file: avoid_print
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/token_storage_service.dart';
@@ -13,6 +15,7 @@ class TokenDebugWidget extends StatefulWidget {
 
 class _TokenDebugWidgetState extends State<TokenDebugWidget> {
   String? _token;
+  // ignore: unused_field
   String? _authHeader;
   Map<String, String?> _userData = {};
   bool _isLoading = true;

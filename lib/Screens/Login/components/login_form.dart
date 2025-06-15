@@ -222,6 +222,7 @@ class _LoginFormState extends State<LoginForm> {
         }
         
         // Update last login if we have the required data
+        // ignore: unnecessary_null_comparison
         if (userId != null && authToken != null && mounted) {
           try {
             await UserApiService.updateLastLogin(userId, authToken: authToken);

@@ -129,6 +129,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     try {
       // Get user ID from token storage or your auth system
       final userData = await TokenStorageService.getUserData();
+      // ignore: unnecessary_null_comparison
       if (userData != null && userData['id'] != null) {
         _userId = userData['id'].toString();
       } else {
@@ -1033,7 +1034,7 @@ class AudioWavePainter extends CustomPainter {
 
    final centerY = size.height / 2;
    final width = size.width;
-   final waveCount = 50;
+   const  waveCount = 50;
    
    for (int i = 0; i < waveCount; i++) {
      final x = (width / waveCount) * i;

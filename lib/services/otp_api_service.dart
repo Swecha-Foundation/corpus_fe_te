@@ -29,7 +29,7 @@ class OTPApiService {
     return (_minIntervalSeconds - secondsSinceLastRequest).clamp(0, _minIntervalSeconds);
   }
   
-  // Send OTP with improved rate limiting and error handling
+  // Send OTP with improved error handling
   static Future<Map<String, dynamic>> sendOTP(String phoneNumber) async {
     // Client-side rate limiting check
     if (!_canSendOTP()) {
@@ -70,17 +70,56 @@ class OTPApiService {
       } else if (response.statusCode == 429) {
         // Server-side rate limiting
         final errorData = _parseResponse(response.body);
+        String message = errorData['message'] ?? 'Too many requests. Please wait before trying again.';
+        
+        // Extract wait time from error message if available
+        int waitTime = 30; // Default
+        final waitTimeMatch = RegExp(r'(\d+)').firstMatch(message);
+        if (waitTimeMatch != null) {
+          waitTime = int.tryParse(waitTimeMatch.group(1)!) ?? 30;
+        }
+        
         return {
           'success': false,
-          'message': 'Too many requests. Please wait before trying again.',
+          'message': message,
           'error': 'rate_limit_server_side',
+          'waitTime': waitTime,
           'details': errorData
         };
       } else if (response.statusCode == 404) {
+        final errorData = _parseResponse(response.body);
         return {
           'success': false,
           'message': 'User not found. Please sign up first.',
-          'error': 'user_not_found'
+          'error': 'user_not_found',
+          'details': errorData
+        };
+      } else if (response.statusCode == 400) {
+        final errorData = _parseResponse(response.body);
+        String errorMessage = errorData['message'] ?? 'Invalid request';
+        
+        // Check if error indicates user doesn't exist
+        if (_isUserNotFoundError(errorMessage)) {
+          return {
+            'success': false,
+            'message': 'User not found. Please sign up first.',
+            'error': 'user_not_found'
+          };
+        }
+        
+        return {
+          'success': false,
+          'message': errorMessage,
+          'error': 'validation_error',
+          'details': errorData
+        };
+      } else if (response.statusCode == 422) {
+        final errorData = _parseResponse(response.body);
+        return {
+          'success': false,
+          'message': 'Invalid phone number format',
+          'error': 'validation_error',
+          'details': errorData
         };
       } else {
         final errorData = _parseResponse(response.body);
@@ -98,7 +137,8 @@ class OTPApiService {
         return {
           'success': false,
           'message': errorMessage,
-          'error': errorData
+          'error': 'server_error',
+          'details': errorData
         };
       }
     } on TimeoutException {
@@ -112,7 +152,7 @@ class OTPApiService {
       return {
         'success': false,
         'message': 'Network error: ${e.toString()}',
-        'error': e.toString()
+        'error': 'network_error'
       };
     }
   }
@@ -156,14 +196,30 @@ class OTPApiService {
         return {
           'success': false,
           'message': errorMessage,
-          'error': errorData
+          'error': 'invalid_otp',
+          'details': errorData
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'User not found',
+          'error': 'user_not_found'
+        };
+      } else if (response.statusCode == 422) {
+        final errorData = _parseResponse(response.body);
+        return {
+          'success': false,
+          'message': 'Invalid request data',
+          'error': 'validation_error',
+          'details': errorData
         };
       } else {
         final errorData = _parseResponse(response.body);
         return {
           'success': false,
           'message': errorData['message'] ?? 'OTP verification failed',
-          'error': errorData
+          'error': 'server_error',
+          'details': errorData
         };
       }
     } on TimeoutException {
@@ -177,7 +233,7 @@ class OTPApiService {
       return {
         'success': false,
         'message': 'Network error: ${e.toString()}',
-        'error': e.toString()
+        'error': 'network_error'
       };
     }
   }
@@ -222,18 +278,35 @@ class OTPApiService {
         };
       } else if (response.statusCode == 429) {
         final errorData = _parseResponse(response.body);
+        String message = errorData['message'] ?? 'Too many requests. Please wait before trying again.';
+        
+        // Extract wait time from error message if available
+        int waitTime = 30; // Default
+        final waitTimeMatch = RegExp(r'(\d+)').firstMatch(message);
+        if (waitTimeMatch != null) {
+          waitTime = int.tryParse(waitTimeMatch.group(1)!) ?? 30;
+        }
+        
         return {
           'success': false,
-          'message': 'Too many requests. Please wait before trying again.',
+          'message': message,
           'error': 'rate_limit_server_side',
+          'waitTime': waitTime,
           'details': errorData
+        };
+      } else if (response.statusCode == 404) {
+        return {
+          'success': false,
+          'message': 'User not found. Please sign up first.',
+          'error': 'user_not_found'
         };
       } else {
         final errorData = _parseResponse(response.body);
         return {
           'success': false,
           'message': errorData['message'] ?? 'Failed to resend OTP',
-          'error': errorData
+          'error': 'server_error',
+          'details': errorData
         };
       }
     } on TimeoutException {
@@ -247,51 +320,54 @@ class OTPApiService {
       return {
         'success': false,
         'message': 'Network error: ${e.toString()}',
-        'error': e.toString()
+        'error': 'network_error'
       };
     }
   }
   
-  // Get remaining wait time for next OTP request
-  static int getRemainingWaitTime() {
-    return _getSecondsUntilNextOTP();
-  }
-  
-  // Check if OTP can be sent now
-  static bool canSendOTPNow() {
-    return _canSendOTP();
-  }
-  
-  // Helper method to safely parse JSON responses
+  // Helper method to parse JSON response safely
   static Map<String, dynamic> _parseResponse(String responseBody) {
     try {
       final decoded = jsonDecode(responseBody);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      return {'message': 'Unexpected response format', 'raw': decoded};
+      return decoded is Map<String, dynamic> ? decoded : {'message': responseBody};
     } catch (e) {
-      return {'message': 'Failed to parse response', 'raw': responseBody};
+      print('Error parsing response: $e');
+      return {'message': responseBody};
     }
   }
   
   // Helper method to check if error indicates user not found
-  static bool _isUserNotFoundError(String errorMessage) {
-    final message = errorMessage.toLowerCase();
-    return message.contains('user not found') || 
-           message.contains('does not exist') ||
-           message.contains('user does not exist') ||
-           message.contains('no user found') ||
-           message.contains('user not registered');
+  static bool _isUserNotFoundError(String message) {
+    final lowerMessage = message.toLowerCase();
+    return lowerMessage.contains('user not found') ||
+           lowerMessage.contains('user does not exist') ||
+           lowerMessage.contains('no user found') ||
+           lowerMessage.contains('phone number not registered') ||
+           lowerMessage.contains('account not found');
   }
   
   // Helper method to check if error indicates invalid OTP
-  static bool _isInvalidOTPError(String errorMessage) {
-    final message = errorMessage.toLowerCase();
-    return message.contains('invalid otp') ||
-           message.contains('incorrect otp') ||
-           message.contains('expired otp') ||
-           message.contains('otp expired') ||
-           message.contains('wrong otp');
+  static bool _isInvalidOTPError(String message) {
+    final lowerMessage = message.toLowerCase();
+    return lowerMessage.contains('invalid otp') ||
+           lowerMessage.contains('incorrect otp') ||
+           lowerMessage.contains('wrong otp') ||
+           lowerMessage.contains('otp verification failed') ||
+           lowerMessage.contains('expired otp');
+  }
+  
+  // Get remaining time for next OTP request (for UI display)
+  static int getRemainingTime() {
+    return _getSecondsUntilNextOTP();
+  }
+  
+  // Reset rate limiting (useful for testing or manual reset)
+  static void resetRateLimit() {
+    _lastOTPRequestTime = null;
+  }
+  
+  // Check if OTP can be sent without making request
+  static bool canSendOTP() {
+    return _canSendOTP();
   }
 }

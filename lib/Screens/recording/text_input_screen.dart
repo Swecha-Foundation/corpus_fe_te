@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, use_build_context_synchronously
+// ignore_for_file: deprecated_member_use, use_build_context_synchronously, avoid_print
 
 import 'package:flutter/material.dart';
 import 'dart:io';
@@ -28,8 +28,8 @@ class _TextInputScreenState extends State<TextInputScreen> {
 
   // API related variables
   File? _textFile;
-  String _userId =
-      'user123'; 
+  // ignore: prefer_final_fields
+  String _userId = 'user123'; // You might want to get this from user session
 
   @override
   void initState() {
@@ -83,17 +83,18 @@ class _TextInputScreenState extends State<TextInputScreen> {
     });
 
     try {
-      // Step 1: Create text file
+      // Step 1: Create text file first
       await _createTextFile();
 
-      // Step 2: Create record
+      // Step 2: Create record with proper parameters
       final createResult = await ApiService.createRecord(
-        title: 'Text Input - ${DateTime.now().toString()}',
-        description:
-            'Text content in $_selectedLanguage language ($_wordCount words)',
+        title: 'Text Input - ${DateTime.now().toString().split('.')[0]}', // Remove microseconds
+        description: 'Text content in $_selectedLanguage language ($_wordCount words)',
         categoryId: widget.selectedCategory ?? 'general',
         userId: _userId,
         mediaType: 'text',
+        fileName: _textFile?.path.split('/').last, // Extract filename
+        fileSize: _textFile?.lengthSync(), // Get file size
       );
 
       if (createResult['success']) {
@@ -104,8 +105,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
           final uploadResult = await ApiService.uploadRecord(
             recordId: recordId,
             file: _textFile!,
-            description:
-                'Text content in $_selectedLanguage ($_wordCount words, $_characterCount characters)',
+            description: 'Text content in $_selectedLanguage ($_wordCount words, $_characterCount characters)',
           );
 
           if (!uploadResult['success']) {
@@ -113,30 +113,47 @@ class _TextInputScreenState extends State<TextInputScreen> {
           }
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Text submitted successfully! ($_wordCount words)'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+        // Clean up temporary file
+        if (_textFile != null && _textFile!.existsSync()) {
+          try {
+            await _textFile!.delete();
+          } catch (e) {
+            print('Error deleting temporary file: $e');
+          }
+        }
 
-        // Navigate back to previous screen
-        Navigator.pop(context);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Text submitted successfully! ($_wordCount words)'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
+            ),
+          );
+
+          // Navigate back to previous screen
+          Navigator.pop(context, true); // Return true to indicate success
+        }
       } else {
-        throw Exception(createResult['error']);
+        throw Exception(createResult['error'] ?? 'Unknown error occurred');
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to submit text: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      print('Submit error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to submit text: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } finally {
-      setState(() {
-        _isUploading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+        });
+      }
     }
   }
 
@@ -162,6 +179,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
                 // Delete local file if it exists
                 if (_textFile != null && _textFile!.existsSync()) {
                   _textFile!.deleteSync();
+                  _textFile = null;
                 }
               },
               child: const Text(

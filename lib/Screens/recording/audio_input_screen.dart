@@ -1,12 +1,25 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print, use_build_context_synchronously
 
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:math' as math;
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../constants.dart';
 import '../../services/api_service.dart';
+import '../../services/token_storage_service.dart';
+
+double cos(double radians) {
+  return math.cos(radians);
+}
+
+double sin(double radians) {
+  return math.sin(radians);
+}
 
 class AudioInputScreen extends StatefulWidget {
   final String? selectedCategory;
@@ -36,10 +49,15 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   String _selectedLanguage = 'Telugu';
   double _audioLevel = 0.0;
   
+  // FIXED: Use AudioRecorder instead of Record
+  AudioRecorder? _audioRecorder;
+  late AudioPlayer _audioPlayer;
+  
   // API related variables
   String? _currentRecordId;
   File? _audioFile;
-  String _userId = 'user123'; // Replace with actual user ID from your auth system
+  String? _userId;
+  Position? _currentPosition;
   
   late AnimationController _pulseController;
   late AnimationController _waveController;
@@ -48,8 +66,106 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   @override
   void initState() {
     super.initState();
+    _initializeAudio();
     _setupAnimations();
-    _checkPermissions();
+    _initializeUser();
+    _getCurrentLocation();
+  }
+
+  void _initializeAudio() async {
+    try {
+      // FIXED: Initialize AudioRecorder properly
+      _audioRecorder = AudioRecorder();
+      _audioPlayer = AudioPlayer();
+      
+      // Check if recording is supported
+      bool isSupported = await _audioRecorder!.isEncoderSupported(AudioEncoder.aacLc);
+      if (!isSupported) {
+        print('Audio recording is not supported on this platform');
+        _showError('Audio recording is not supported on this device');
+        return;
+      }
+      
+      // Listen to player state changes
+      _audioPlayer.onPlayerStateChanged.listen((PlayerState state) {
+        if (mounted) {
+          setState(() {
+            _isPlaying = state == PlayerState.playing;
+          });
+          
+          if (state == PlayerState.completed) {
+            _stopPlayback();
+          }
+        }
+      });
+
+      // Listen to position changes during playback
+      _audioPlayer.onPositionChanged.listen((Duration position) {
+        if (mounted) {
+          setState(() {
+            _playbackPosition = position;
+          });
+        }
+      });
+    } catch (e) {
+      print('Error initializing audio: $e');
+      _showError('Failed to initialize audio recording: $e');
+    }
+  }
+
+  void _showError(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  Future<void> _initializeUser() async {
+    try {
+      // Get user ID from token storage or your auth system
+      final userData = await TokenStorageService.getUserData();
+      if (userData != null && userData['id'] != null) {
+        _userId = userData['id'].toString();
+      } else {
+        // Fallback - you might want to redirect to login instead
+        _userId = 'anonymous_user';
+      }
+    } catch (e) {
+      print('Failed to get user data: $e');
+      _userId = 'anonymous_user';
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        return;
+      }
+
+      _currentPosition = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+    } catch (e) {
+      print('Failed to get location: $e');
+    }
   }
 
   void _setupAnimations() {
@@ -74,158 +190,240 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     _pulseController.repeat(reverse: true);
   }
 
-  Future<void> _checkPermissions() async {
-    final status = await Permission.microphone.status;
-    if (!status.isGranted) {
-      await Permission.microphone.request();
-    }
-  }
-
   @override
   void dispose() {
     _recordingTimer?.cancel();
     _playbackTimer?.cancel();
     _pulseController.dispose();
     _waveController.dispose();
+    _audioRecorder?.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
-  Future<void> _startRecording() async {
-    // Check microphone permission
-    final status = await Permission.microphone.status;
-    if (!status.isGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Microphone permission is required for recording'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
+  Future<bool> _requestPermissions() async {
+    try {
+      // Request microphone permission
+      PermissionStatus microphoneStatus = await Permission.microphone.request();
+      
+      if (microphoneStatus != PermissionStatus.granted) {
+        _showError('Microphone permission is required for recording');
+        return false;
+      }
+
+      // For Android, also request storage permission if needed
+      if (Platform.isAndroid) {
+        PermissionStatus storageStatus = await Permission.storage.request();
+        if (storageStatus != PermissionStatus.granted) {
+          // Try with manage external storage for Android 11+
+          await Permission.manageExternalStorage.request();
+        }
+      }
+
+      return true;
+    } catch (e) {
+      print('Error requesting permissions: $e');
+      _showError('Failed to request permissions: $e');
+      return false;
     }
+  }
 
-    // Create audio file
-    final directory = await getTemporaryDirectory();
-    final fileName = 'audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
-    _audioFile = File('${directory.path}/$fileName');
+  Future<void> _startRecording() async {
+    try {
+      if (_audioRecorder == null) {
+        _showError('Audio recorder not initialized');
+        return;
+      }
 
-    setState(() {
-      _isRecording = true;
-      _isPaused = false;
-      _recordingDuration = Duration.zero;
-      _hasRecording = false;
-      _currentRecordId = null;
-    });
-    
-    _waveController.repeat();
-    
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      // Request permissions first
+      bool hasPermissions = await _requestPermissions();
+      if (!hasPermissions) {
+        return;
+      }
+
+      // Check if recorder has permission
+      bool hasPermission = await _audioRecorder!.hasPermission();
+      if (!hasPermission) {
+        _showError('Microphone permission denied');
+        return;
+      }
+
+      // Create audio file path
+      final directory = await getApplicationDocumentsDirectory();
+      final fileName = 'audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      final filePath = '${directory.path}/$fileName';
+      _audioFile = File(filePath);
+
+      // FIXED: Start recording with proper configuration
+      await _audioRecorder!.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+          numChannels: 1,
+        ),
+        path: filePath,
+      );
+
       setState(() {
-        _recordingDuration = Duration(seconds: timer.tick);
-        // Simulate audio level changes
-        _audioLevel = (timer.tick % 3) * 0.3 + 0.2;
+        _isRecording = true;
+        _isPaused = false;
+        _recordingDuration = Duration.zero;
+        _hasRecording = false;
+        _currentRecordId = null;
       });
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Recording started...'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
-  void _pauseRecording() {
-    setState(() {
-      _isPaused = true;
-    });
-    _recordingTimer?.cancel();
-    _waveController.stop();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Recording paused'),
-        backgroundColor: Colors.orange,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
-  void _resumeRecording() {
-    setState(() {
-      _isPaused = false;
-    });
-    
-    _waveController.repeat();
-    
-    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _recordingDuration = _recordingDuration + const Duration(seconds: 1);
-        _audioLevel = (timer.tick % 3) * 0.3 + 0.2;
-      });
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Recording resumed'),
-        backgroundColor: Colors.green,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
-  void _stopRecording() {
-    setState(() {
-      _isRecording = false;
-      _isPaused = false;
-      _hasRecording = true;
-      _audioLevel = 0.0;
-    });
-    
-    _recordingTimer?.cancel();
-    _waveController.stop();
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Recording stopped'),
-        backgroundColor: Colors.blue,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
-  void _playRecording() {
-    if (!_hasRecording) return;
-    
-    setState(() {
-      _isPlaying = true;
-      _playbackPosition = Duration.zero;
-    });
-    
-    _playbackTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      setState(() {
-        _playbackPosition = Duration(seconds: timer.tick);
-        if (_playbackPosition >= _recordingDuration) {
-          _stopPlayback();
+      
+      _waveController.repeat();
+      
+      // Start recording timer
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            _recordingDuration = Duration(seconds: timer.tick);
+            // Simulate audio level changes - in real app you'd get actual levels
+            _audioLevel = (timer.tick % 3) * 0.3 + 0.2;
+          });
         }
       });
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Playing recording...'),
-        backgroundColor: Colors.purple,
-        duration: Duration(seconds: 1),
-      ),
-    );
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recording started...'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      print('Error starting recording: $e');
+      _showError('Failed to start recording: $e');
+    }
   }
 
-  void _stopPlayback() {
-    setState(() {
-      _isPlaying = false;
-      _playbackPosition = Duration.zero;
-    });
-    _playbackTimer?.cancel();
+  Future<void> _pauseRecording() async {
+    try {
+      if (_audioRecorder == null) return;
+      
+      await _audioRecorder!.pause();
+      setState(() {
+        _isPaused = true;
+      });
+      _recordingTimer?.cancel();
+      _waveController.stop();
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recording paused'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      print('Error pausing recording: $e');
+      _showError('Failed to pause recording: $e');
+    }
+  }
+
+  Future<void> _resumeRecording() async {
+    try {
+      if (_audioRecorder == null) return;
+      
+      await _audioRecorder!.resume();
+      setState(() {
+        _isPaused = false;
+      });
+      
+      _waveController.repeat();
+      
+      _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (mounted) {
+          setState(() {
+            _recordingDuration = _recordingDuration + const Duration(seconds: 1);
+            _audioLevel = (timer.tick % 3) * 0.3 + 0.2;
+          });
+        }
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recording resumed'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      print('Error resuming recording: $e');
+      _showError('Failed to resume recording: $e');
+    }
+  }
+
+  Future<void> _stopRecording() async {
+    try {
+      if (_audioRecorder == null) return;
+      
+      final path = await _audioRecorder!.stop();
+      
+      setState(() {
+        _isRecording = false;
+        _isPaused = false;
+        _hasRecording = true;
+        _audioLevel = 0.0;
+      });
+      
+      _recordingTimer?.cancel();
+      _waveController.stop();
+      
+      if (path != null) {
+        _audioFile = File(path);
+        print('Recording saved to: $path');
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recording stopped'),
+          backgroundColor: Colors.blue,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      print('Error stopping recording: $e');
+      _showError('Failed to stop recording: $e');
+    }
+  }
+
+  Future<void> _playRecording() async {
+    if (!_hasRecording || _audioFile == null) return;
+    
+    try {
+      await _audioPlayer.play(DeviceFileSource(_audioFile!.path));
+      
+      setState(() {
+        _isPlaying = true;
+        _playbackPosition = Duration.zero;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Playing recording...'),
+          backgroundColor: Colors.purple,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      print('Error playing recording: $e');
+      _showError('Failed to play recording: $e');
+    }
+  }
+
+  Future<void> _stopPlayback() async {
+    try {
+      await _audioPlayer.stop();
+      setState(() {
+        _isPlaying = false;
+        _playbackPosition = Duration.zero;
+      });
+    } catch (e) {
+      print('Error stopping playback: $e');
+    }
   }
 
   void _deleteRecording() {
@@ -275,105 +473,8 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     );
   }
 
-  Future<void> _createRecord() async {
-    if (!_hasRecording) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please record audio first'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isUploading = true;
-    });
-
-    try {
-      // Create record first
-      final createResult = await ApiService.createRecord(
-        title: 'Audio Recording - ${DateTime.now().toString()}',
-        description: 'Audio recording in $_selectedLanguage language',
-        categoryId: widget.selectedCategory ?? 'general',
-        userId: _userId,
-        mediaType: 'audio',
-      );
-
-      if (createResult['success']) {
-        _currentRecordId = createResult['data']['id'];
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Record created successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        throw Exception(createResult['error']);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to create record: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      setState(() {
-        _isUploading = false;
-      });
-    }
-  }
-
-  Future<void> _uploadAudio() async {
-    if (!_hasRecording || _audioFile == null || _currentRecordId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please create a record first'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isUploading = true;
-    });
-
-    try {
-      final uploadResult = await ApiService.uploadRecord(
-        recordId: _currentRecordId!,
-        file: _audioFile!,
-        description: 'Audio recording in $_selectedLanguage',
-      );
-
-      if (uploadResult['success']) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Audio uploaded successfully'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      } else {
-        throw Exception(uploadResult['error']);
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to upload audio: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      setState(() {
-        _isUploading = false;
-      });
-    }
-  }
-
   Future<void> _submitRecording() async {
-    if (!_hasRecording) {
+    if (!_hasRecording || _audioFile == null || _userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please record audio first'),
@@ -428,34 +529,47 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     });
 
     try {
-      // Step 1: Create record
-      if (_currentRecordId == null) {
-        final createResult = await ApiService.createRecord(
-          title: 'Audio Recording - ${DateTime.now().toString()}',
-          description: 'Audio recording in $_selectedLanguage language',
-          categoryId: widget.selectedCategory ?? 'general',
-          userId: _userId,
-          mediaType: 'audio',
-        );
+      if (_audioFile == null || !_audioFile!.existsSync()) {
+        throw Exception('Audio file not found');
+      }
 
-        if (createResult['success']) {
-          _currentRecordId = createResult['data']['id'];
-        } else {
-          throw Exception(createResult['error']);
-        }
+      // Get file info
+      final fileSize = await _audioFile!.length();
+      final fileName = _audioFile!.path.split('/').last;
+
+      // Step 1: Create record with all required information
+      final createResult = await ApiService.createRecord(
+        title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}',
+        description: 'Audio recording in $_selectedLanguage language (${_formatDuration(_recordingDuration)})',
+        categoryId: widget.selectedCategory ?? 'general',
+        userId: _userId!,
+        mediaType: 'audio',
+        latitude: _currentPosition?.latitude,
+        longitude: _currentPosition?.longitude,
+        fileName: fileName,
+        fileSize: fileSize,
+      );
+
+      if (!createResult['success']) {
+        throw Exception(createResult['error'] ?? 'Failed to create record');
+      }
+
+      final recordData = createResult['data'];
+      _currentRecordId = recordData['id']?.toString();
+
+      if (_currentRecordId == null) {
+        throw Exception('No record ID returned from server');
       }
 
       // Step 2: Upload audio file
-      if (_audioFile != null && _audioFile!.existsSync()) {
-        final uploadResult = await ApiService.uploadRecord(
-          recordId: _currentRecordId!,
-          file: _audioFile!,
-          description: 'Audio recording in $_selectedLanguage',
-        );
+      final uploadResult = await ApiService.uploadRecord(
+        recordId: _currentRecordId!,
+        file: _audioFile!,
+        description: 'Audio recording in $_selectedLanguage (${_formatDuration(_recordingDuration)})',
+      );
 
-        if (!uploadResult['success']) {
-          throw Exception(uploadResult['error']);
-        }
+      if (!uploadResult['success']) {
+        throw Exception(uploadResult['error'] ?? 'Failed to upload audio file');
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -469,12 +583,18 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       );
       
       // Navigate back to previous screen
-      Navigator.pop(context);
+      Navigator.pop(context, {
+        'success': true,
+        'recordId': _currentRecordId,
+        'duration': _recordingDuration.inSeconds,
+      });
     } catch (e) {
+      print('Submit error: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to submit recording: $e'),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
         ),
       );
     } finally {
@@ -572,7 +692,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                             DropdownButton<String>(
                               value: _selectedLanguage,
                               underline: Container(),
-                              items: ['Telugu', 'English'].map((String value) {
+                              items: ['Telugu', 'English', 'Hindi', 'Tamil'].map((String value) {
                                 return DropdownMenuItem<String>(
                                   value: value,
                                   child: Text(
@@ -582,9 +702,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                                 );
                               }).toList(),
                               onChanged: (String? newValue) {
-                                setState(() {
-                                  _selectedLanguage = newValue!;
-                                });
+                                if (newValue != null && !_isRecording) {
+                                  setState(() {
+                                    _selectedLanguage = newValue;
+                                  });
+                                }
                               },
                             ),
                           ],
@@ -613,12 +735,15 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                               children: [
                                 const Icon(Icons.check_circle, color: Colors.green, size: 16),
                                 const SizedBox(width: 4),
-                                Text(
-                                  'Record ID: $_currentRecordId',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.green,
-                                    fontWeight: FontWeight.w500,
+                                Expanded(
+                                  child: Text(
+                                    'Record ID: $_currentRecordId',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.green,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ],
@@ -697,7 +822,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                           const SizedBox(height: 40),
                           
                           // Audio Visualization
-                          Container(
+                          SizedBox(
                             height: 100,
                             child: AnimatedBuilder(
                               animation: _waveController,
@@ -828,32 +953,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                                   ),
                                 ),
                               ],
-                              if (_hasRecording && !_isRecording) ...[
-                                IconButton(
-                                  onPressed: _currentRecordId == null ? _createRecord : null,
-                                  icon: const Icon(Icons.cloud_upload),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: _currentRecordId == null 
-                                        ? Colors.blue.shade100 
-                                        : Colors.grey.shade100,
-                                    foregroundColor: _currentRecordId == null 
-                                        ? Colors.blue 
-                                        : Colors.grey,
-                                  ),
-                                ),
-                                IconButton(
-                                  onPressed: _currentRecordId != null && _audioFile != null ? _uploadAudio : null,
-                                  icon: const Icon(Icons.upload_file),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: _currentRecordId != null && _audioFile != null
-                                        ? Colors.green.shade100
-                                        : Colors.grey.shade100,
-                                    foregroundColor: _currentRecordId != null && _audioFile != null
-                                        ? Colors.green
-                                        : Colors.grey,
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
                         ],
@@ -868,100 +967,97 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                       width: double.infinity,
                       child: ElevatedButton(
                         onPressed: _isUploading ? null : _submitRecording,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kPrimaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: _isUploading
-                            ? const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  ),
-                                  SizedBox(width: 12),
-                                  Text('Submitting...'),
-                                ],
-                              )
-                            : const Text(
-                                'Submit Recording',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+                       style: ElevatedButton.styleFrom(
+                         backgroundColor: kPrimaryColor,
+                         foregroundColor: Colors.white,
+                         padding: const EdgeInsets.symmetric(vertical: 16),
+                         shape: RoundedRectangleBorder(
+                           borderRadius: BorderRadius.circular(8),
+                         ),
+                         elevation: 2,
+                       ),
+                       child: _isUploading
+                           ? const Row(
+                               mainAxisAlignment: MainAxisAlignment.center,
+                               children: [
+                                 SizedBox(
+                                   width: 20,
+                                   height: 20,
+                                   child: CircularProgressIndicator(
+                                     strokeWidth: 2,
+                                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                   ),
+                                 ),
+                                 SizedBox(width: 12),
+                                 Text('Uploading...'),
+                               ],
+                             )
+                           : const Text(
+                               'Submit Recording',
+                               style: TextStyle(
+                                 fontSize: 16,
+                                 fontWeight: FontWeight.w600,
+                               ),
+                             ),
+                     ),
+                   ),
+                 
+                 const SizedBox(height: 16),
+               ],
+             ),
+           ),
+         ),
+       ),
+     ),
+   );
+ }
 }
 
-// Custom painter for audio wave visualization
 class AudioWavePainter extends CustomPainter {
-  final double animationValue;
-  final double audioLevel;
-  final bool isRecording;
+ final double animationValue;
+ final double audioLevel;
+ final bool isRecording;
 
-  AudioWavePainter({
-    required this.animationValue,
-    required this.audioLevel,
-    required this.isRecording,
-  });
+ AudioWavePainter({
+   required this.animationValue,
+   required this.audioLevel,
+   required this.isRecording,
+ });
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = kPrimaryColor.withOpacity(0.6)
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
+ @override
+ void paint(Canvas canvas, Size size) {
+   final paint = Paint()
+     ..color = isRecording ? kPrimaryColor.withOpacity(0.6) : Colors.grey.withOpacity(0.3)
+     ..strokeWidth = 2
+     ..style = PaintingStyle.stroke;
 
-    final center = Offset(size.width / 2, size.height / 2);
-    final waveCount = 5;
-    
-    for (int i = 0; i < waveCount; i++) {
-      final progress = (animationValue + i * 0.2) % 1.0;
-      final amplitude = isRecording ? (audioLevel * 30 + 10) * (1 - progress) : 5;
-      final radius = progress * size.width / 2;
-      
-      paint.color = kPrimaryColor.withOpacity((1 - progress) * 0.5);
-      
-      canvas.drawCircle(center, radius, paint);
-      
-      // Draw vertical bars
-      if (isRecording) {
-        for (int j = 0; j < 20; j++) {
-          final x = (j / 19) * size.width;
-          final barHeight = amplitude * (0.5 + 0.5 * (j % 3)) * (1 - progress);
-          final y1 = center.dy - barHeight / 2;
-          final y2 = center.dy + barHeight / 2;
-          
-          canvas.drawLine(
-            Offset(x, y1),
-            Offset(x, y2),
-            Paint()
-              ..color = kPrimaryColor.withOpacity((1 - progress) * 0.7)
-              ..strokeWidth = 1,
-          );
-        }
-      }
-    }
-  }
+   final centerY = size.height / 2;
+   final width = size.width;
+   final waveCount = 50;
+   
+   for (int i = 0; i < waveCount; i++) {
+     final x = (width / waveCount) * i;
+     final normalizedX = x / width;
+     
+     // Create wave effect
+     final waveOffset = sin((normalizedX * 4 * math.pi) + (animationValue * 2 * math.pi));
+     final amplitude = isRecording ? (audioLevel * 30 + 10) : 5;
+     final y1 = centerY - (waveOffset * amplitude);
+     final y2 = centerY + (waveOffset * amplitude);
+     
+     // Draw wave line
+     canvas.drawLine(
+       Offset(x, y1),
+       Offset(x, y2),
+       paint,
+     );
+   }
+ }
 
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+ @override
+ bool shouldRepaint(AudioWavePainter oldDelegate) {
+   return oldDelegate.animationValue != animationValue ||
+          oldDelegate.audioLevel != audioLevel ||
+          oldDelegate.isRecording != isRecording;
+ }
 }

@@ -67,70 +67,48 @@ class _LoginFormState extends State<LoginForm> {
       
       if (!mounted) return;
       
-      // First, check if user exists using the dedicated endpoint
-      final userExistsResult = await UserApiService.checkUserExists(phoneNumber);
+      // Directly send OTP without checking user existence first
+      // The OTP service will handle whether the user exists or not
+      final otpResult = await OTPApiService.sendOTP(phoneNumber);
       
       if (!mounted) return;
       
-      print('User exists check result: $userExistsResult');
+      print('OTP result: $otpResult');
       
-      if (userExistsResult['success'] == true) {
-        // User exists, now send OTP
-        print('User exists - Sending OTP');
-        
-        final otpResult = await OTPApiService.sendOTP(phoneNumber);
-        
-        if (!mounted) return;
-        
-        print('OTP result: $otpResult');
-        
-        if (otpResult['success'] == true) {
-          print('OTP sent successfully');
-          if (mounted) {
-            // Show success message
-            _showSnackBar('OTP sent to your phone number', Colors.green);
-            
-            // Get user data from the existence check
-            final userData = userExistsResult['data']?['user'];
-            String userName = userData?['name'] ?? 'User';
-            
-            // Navigate to OTP screen
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => OTPScreen(
-                  phoneNumber: phoneNumber,
-                  name: userName,
-                  isNewUser: false,
-                  userData: userData ?? {'phone': phoneNumber},
-                ),
-              ),
-            );
-          }
-        } else {
-          // Failed to send OTP even though user exists
-          String errorMessage = otpResult['message'] ?? 'Failed to send OTP';
-          String errorType = otpResult['error'] ?? '';
+      if (otpResult['success'] == true) {
+        print('OTP sent successfully');
+        if (mounted) {
+          // Show success message
+          _showSnackBar('OTP sent to your phone number', Colors.green);
           
-          if (errorType == 'rate_limit_client_side' || errorType == 'rate_limit_server_side') {
-            // Handle rate limiting
-            int waitTime = otpResult['waitTime'] ?? 30;
-            _showSnackBar(
-              'Please wait $waitTime seconds before requesting another OTP',
-              Colors.orange,
-            );
-          } else {
-            // Other errors
-            _showSnackBar(errorMessage, Colors.red);
-          }
+          // Navigate to OTP screen with minimal user data
+          // We'll get the full user data after OTP verification
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OTPScreen(
+                phoneNumber: phoneNumber,
+                name: 'User', // Default name, will be updated after verification
+                isNewUser: false, // Assume existing user for login
+                userData: {'phone': phoneNumber},
+              ),
+            ),
+          );
         }
       } else {
-        // User doesn't exist
-        print('User does not exist: ${userExistsResult['message']}');
+        // Handle different types of errors
+        String errorMessage = otpResult['message'] ?? 'Failed to send OTP';
+        String errorType = otpResult['error'] ?? '';
         
-        String errorType = userExistsResult['error'] ?? '';
-        
-        if (errorType == 'user_not_found') {
+        if (errorType == 'rate_limit_client_side' || errorType == 'rate_limit_server_side') {
+          // Handle rate limiting
+          int waitTime = otpResult['waitTime'] ?? 30;
+          _showSnackBar(
+            'Please wait $waitTime seconds before requesting another OTP',
+            Colors.orange,
+          );
+        } else if (errorType == 'user_not_found' || errorMessage.toLowerCase().contains('user not found')) {
+          // User doesn't exist - suggest signup
           _showSnackBar(
             'No account found with this phone number. Please sign up first.',
             Colors.orange,
@@ -149,14 +127,13 @@ class _LoginFormState extends State<LoginForm> {
               },
             ),
           );
-        } else if (errorType == 'forbidden') {
+        } else if (errorType == 'timeout') {
           _showSnackBar(
-            'Unable to verify user. Please try again or contact support.',
+            'Request timed out. Please check your internet connection and try again.',
             Colors.red,
           );
         } else {
-          // Other errors (network, validation, etc.)
-          String errorMessage = userExistsResult['message'] ?? 'Failed to verify user';
+          // Other errors
           _showSnackBar(errorMessage, Colors.red);
         }
       }
@@ -270,15 +247,20 @@ class _LoginFormState extends State<LoginForm> {
       } else {
         // Password login failed
         String errorMessage = loginResult['message'] ?? 'Login failed';
+        String errorType = loginResult['error']?.toString() ?? '';
         
         // Provide more user-friendly error messages
         if (errorMessage.toLowerCase().contains('invalid') || 
             errorMessage.toLowerCase().contains('incorrect') ||
-            errorMessage.toLowerCase().contains('unauthorized')) {
+            errorMessage.toLowerCase().contains('unauthorized') ||
+            errorType.contains('invalid_credentials')) {
           errorMessage = 'Invalid phone number or password';
         } else if (errorMessage.toLowerCase().contains('user not found') || 
-                   errorMessage.toLowerCase().contains('does not exist')) {
-          errorMessage = 'No account found with this phone number';
+                   errorMessage.toLowerCase().contains('does not exist') ||
+                   errorType == 'user_not_found') {
+          errorMessage = 'No account found with this phone number. Please sign up first.';
+        } else if (errorType == 'timeout') {
+          errorMessage = 'Request timed out. Please check your internet connection and try again.';
         }
         
         _showSnackBar(errorMessage, Colors.red);

@@ -7,7 +7,6 @@ import '../../../constants.dart';
 import '../../../services/otp_api_service.dart';
 import '../../../services/user_api_service.dart';
 import '../../../services/token_storage_service.dart';
-import '../../../services/auth_service.dart';
 import '../../Dashboard/dashboard_screen.dart';
 
 class OTPForm extends StatefulWidget {
@@ -42,6 +41,13 @@ class _OTPFormState extends State<OTPForm> {
   void initState() {
     super.initState();
     _startResendCountdown();
+    
+    // Auto-focus on first field
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        FocusScope.of(context).requestFocus(_focusNodes[0]);
+      }
+    });
   }
   
   @override
@@ -85,7 +91,12 @@ class _OTPFormState extends State<OTPForm> {
         _focusNodes[index].unfocus();
         // Auto-verify when all digits are entered
         if (_isOTPComplete() && !_isVerifying) {
-          _verifyOTP();
+          // Small delay to show the complete OTP before verification
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (mounted && _isOTPComplete() && !_isVerifying) {
+              _verifyOTP();
+            }
+          });
         }
       }
     }
@@ -105,7 +116,7 @@ class _OTPFormState extends State<OTPForm> {
     return _getOTPCode().length == 6;
   }
   
-  void _showSnackBar(String message, Color backgroundColor) {
+  void _showSnackBar(String message, Color backgroundColor, {SnackBarAction? action}) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -115,172 +126,197 @@ class _OTPFormState extends State<OTPForm> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
-          duration: const Duration(seconds: 3),
+          action: action,
+          duration: const Duration(seconds: 4),
         ),
       );
     }
   }
   
-  // Updated _verifyOTP method for otp_form.dart
-
-void _verifyOTP() async {
-  if (!_isOTPComplete()) {
-    _showSnackBar('Please enter complete OTP', Colors.red);
-    return;
-  }
-  
-  if (_isVerifying) return; // Prevent multiple calls
-  
-  setState(() {
-    _isVerifying = true;
-  });
-
-  String otpCode = _getOTPCode();
-  
-  try {
-    print('Verifying OTP: $otpCode for phone: ${widget.phoneNumber}');
-    
-    // Verify OTP API call
-    final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
-    
-    if (!mounted) return;
-    
-    if (result['success'] == true) {
-      print('OTP verification successful');
-      
-      // Extract token data from response
-      final responseData = result['data'];
-      if (responseData != null) {
-        String? accessToken = responseData['access_token']?.toString();
-        String tokenType = responseData['token_type']?.toString() ?? 'bearer';
-        String? refreshToken = responseData['refresh_token']?.toString();
-        
-        print('=== Token Information ===');
-        print('Access Token: ${accessToken?.substring(0, 20)}...');
-        print('Token Type: $tokenType');
-        print('Refresh Token: ${refreshToken?.substring(0, 20) ?? 'None'}...');
-        
-        if (accessToken != null && accessToken.isNotEmpty) {
-          // Store authentication data
-          final stored = await TokenStorageService.storeAuthData(
-            token: accessToken,
-            tokenType: tokenType,
-            userId: widget.userData?['id']?.toString() ?? responseData['user_id']?.toString(),
-            phoneNumber: widget.phoneNumber,
-            userName: widget.name,
-            refreshToken: refreshToken,
-            // Token expires in 24 hours by default
-            expiryTime: DateTime.now().add(const Duration(hours: 24)),
-          );
-          
-          if (stored) {
-            print('✅ Token stored successfully');
-            
-            // Debug: Print stored auth data
-            await TokenStorageService.debugPrintAuthData();
-            
-            // Debug: Get token for manual testing
-            final testToken = await ApiService.getTokenForTesting();
-            if (testToken != null) {
-              print('\n🔑 Copy this token to authorize in Swagger UI:');
-              print('Bearer $testToken');
-              print('\n📋 Steps to authorize:');
-              print('1. Go to https://backend2.swecha.org/docs#');
-              print('2. Click the "Authorize" button (🔒)');
-              print('3. Paste: Bearer $testToken');
-              print('4. Click "Authorize"');
-            }
-          } else {
-            print('❌ Failed to store token');
-          }
-        } else {
-          print('⚠️ No access token received in response');
-        }
-      }
-      
-      // Handle successful OTP verification
-      if (widget.isNewUser) {
-        _showSnackBar('Registration completed successfully!', Colors.green);
-      } else {
-        // Update last login for existing users
-        if (widget.userData != null) {
-          final userId = widget.userData!['id']?.toString();
-          if (userId != null) {
-            try {
-              await UserApiService.updateLastLogin(userId);
-            } catch (e) {
-              print('Failed to update last login: $e');
-              // Continue with login process even if last login update fails
-            }
-          }
-        }
-        
-        _showSnackBar('Login successful!', Colors.green);
-      }
-      
-      // Small delay to show success message
-      await Future.delayed(const Duration(milliseconds: 800));
-      
-      // Navigate to Dashboard after successful OTP verification
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(
-            builder: (context) => DashboardScreen(
-              userName: widget.name,
-              phoneNumber: widget.phoneNumber,
-            ),
-          ),
-          (route) => false, // Remove all previous routes
-        );
-      }
-    } else {
-      // Show error message
-      String errorMessage = result['message'] ?? 'OTP verification failed';
-      
-      // Provide user-friendly error messages
-      if (errorMessage.toLowerCase().contains('invalid') ||
-          errorMessage.toLowerCase().contains('incorrect') ||
-          errorMessage.toLowerCase().contains('wrong')) {
-        errorMessage = 'Invalid OTP. Please check and try again.';
-      } else if (errorMessage.toLowerCase().contains('expired')) {
-        errorMessage = 'OTP has expired. Please request a new one.';
-      }
-      
-      _showSnackBar(errorMessage, Colors.red);
-      
-      // Clear OTP fields on error
-      for (var controller in _controllers) {
-        controller.clear();
-      }
-      // Focus on first field
-      if (mounted) {
-        FocusScope.of(context).requestFocus(_focusNodes[0]);
-      }
+  void _clearOTPFields() {
+    for (var controller in _controllers) {
+      controller.clear();
     }
-  } catch (e) {
-    print('OTP verification error: $e');
     if (mounted) {
-      _showSnackBar('Network error occurred. Please try again.', Colors.red);
-      
-      // Clear OTP fields on error
-      for (var controller in _controllers) {
-        controller.clear();
-      }
-      // Focus on first field
       FocusScope.of(context).requestFocus(_focusNodes[0]);
     }
-  } finally {
-    if (mounted) {
-      setState(() {
-        _isVerifying = false;
-      });
+  }
+  
+  void _verifyOTP() async {
+    if (!_isOTPComplete()) {
+      _showSnackBar('Please enter complete OTP', Colors.red);
+      return;
+    }
+    
+    if (_isVerifying) return; // Prevent multiple calls
+    
+    setState(() {
+      _isVerifying = true;
+    });
+
+    String otpCode = _getOTPCode();
+    
+    try {
+      print('Verifying OTP: $otpCode for phone: ${widget.phoneNumber}');
+      
+      // Verify OTP API call
+      final result = await OTPApiService.verifyOTP(widget.phoneNumber, otpCode);
+      
+      if (!mounted) return;
+      
+      if (result['success'] == true) {
+        print('OTP verification successful');
+        
+        // Extract token data from response
+        final responseData = result['data'];
+        if (responseData != null) {
+          String? accessToken = responseData['access_token']?.toString();
+          String tokenType = responseData['token_type']?.toString() ?? 'bearer';
+          String? userId = responseData['user_id']?.toString();
+          String? phoneNumber = responseData['phone_number']?.toString();
+          
+          print('=== Token Information ===');
+          print('Access Token: ${accessToken?.substring(0, 20)}...');
+          print('Token Type: $tokenType');
+          print('User ID: $userId');
+          print('Phone Number: $phoneNumber');
+          
+          if (accessToken != null && accessToken.isNotEmpty) {
+            // Store authentication data
+            final stored = await TokenStorageService.storeAuthData(
+              token: accessToken,
+              tokenType: tokenType,
+              userId: userId,
+              phoneNumber: phoneNumber ?? widget.phoneNumber,
+              userName: widget.name,
+              // Token expires in 24 hours by default
+              expiryTime: DateTime.now().add(const Duration(hours: 24)),
+            );
+            
+            if (stored) {
+              print('✅ Token stored successfully');
+              
+              // Debug: Print stored auth data
+              await TokenStorageService.debugPrintAuthData();
+              
+              // Test token retrieval
+              final retrievedToken = await TokenStorageService.getAuthToken();
+              final authHeader = await TokenStorageService.getAuthorizationHeader();
+              
+              if (retrievedToken != null) {
+                print('\n🔑 Token retrieved successfully:');
+                print('Token: ${retrievedToken.substring(0, 20)}...');
+                print('Auth Header: $authHeader');
+                print('\n📋 You can now use this token in API calls');
+              } else {
+                print('❌ Failed to retrieve stored token');
+              }
+              
+            } else {
+              print('❌ Failed to store token');
+            }
+          } else {
+            print('⚠️ No access token received in response');
+          }
+        }
+        
+        // Handle successful OTP verification
+        if (widget.isNewUser) {
+          _showSnackBar('Registration completed successfully!', Colors.green);
+        } else {
+          // Update last login for existing users
+          if (widget.userData != null) {
+            final userIdFromData = widget.userData!['id']?.toString();
+            if (userIdFromData != null) {
+              try {
+                // Get the stored token for the API call
+                final storedToken = await TokenStorageService.getAuthToken();
+                if (storedToken != null) {
+                  await UserApiService.updateLastLogin(userIdFromData, authToken: storedToken);
+                  print('✅ Last login updated successfully');
+                } else {
+                  print('⚠️ No stored token available for last login update');
+                }
+              } catch (e) {
+                print('Failed to update last login: $e');
+                // Continue with login process even if last login update fails
+              }
+            }
+          }
+          
+          _showSnackBar('Login successful!', Colors.green);
+        }
+        
+        // Small delay to show success message
+        await Future.delayed(const Duration(milliseconds: 800));
+        
+        // Navigate to Dashboard after successful OTP verification
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DashboardScreen(
+                userName: widget.name,
+                phoneNumber: widget.phoneNumber,
+              ),
+            ),
+            (route) => false, // Remove all previous routes
+          );
+        }
+      } else {
+        // Show error message
+        String errorMessage = result['message'] ?? 'OTP verification failed';
+        String errorType = result['error'] ?? '';
+        
+        // Provide user-friendly error messages
+        if (errorMessage.toLowerCase().contains('invalid') ||
+            errorMessage.toLowerCase().contains('incorrect') ||
+            errorMessage.toLowerCase().contains('wrong')) {
+          errorMessage = 'Invalid OTP. Please check and try again.';
+        } else if (errorMessage.toLowerCase().contains('expired')) {
+          errorMessage = 'OTP has expired. Please request a new one.';
+          // Auto-clear fields and show resend option
+          _clearOTPFields();
+          if (_resendCountdown > 0) {
+            setState(() {
+              _resendCountdown = 0;
+            });
+          }
+        } else if (errorType == 'timeout') {
+          errorMessage = 'Request timed out. Please check your internet connection and try again.';
+        }
+        
+        _showSnackBar(errorMessage, Colors.red);
+        
+        // Clear OTP fields on error (except for timeout errors)
+        if (errorType != 'timeout') {
+          _clearOTPFields();
+        }
+      }
+    } catch (e) {
+      print('OTP verification error: $e');
+      if (mounted) {
+        _showSnackBar('Network error occurred. Please try again.', Colors.red);
+        // Don't clear fields on network error - user might want to retry
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isVerifying = false;
+        });
+      }
     }
   }
-}
   
   void _resendOTP() async {
     if (_isResending) return; // Prevent multiple calls
+    
+    // Check if we can send OTP (using the new helper method)
+    if (!OTPApiService.canSendOTP()) {
+      int waitTime = OTPApiService.getRemainingTime();
+      _showSnackBar('Please wait $waitTime seconds before requesting another OTP', Colors.orange);
+      return;
+    }
     
     setState(() {
       _isResending = true;
@@ -289,24 +325,22 @@ void _verifyOTP() async {
     try {
       print('Resending OTP to: ${widget.phoneNumber}');
       
-      // Resend OTP API call
+      // Use sendOTP instead of resendOTP for consistency
       final result = await OTPApiService.sendOTP(widget.phoneNumber);
       
       if (!mounted) return;
       
       if (result['success'] == true) {
         // Clear all fields
-        for (var controller in _controllers) {
-          controller.clear();
-        }
-        // Focus on first field
-        FocusScope.of(context).requestFocus(_focusNodes[0]);
+        _clearOTPFields();
         
         // Restart countdown
         _startResendCountdown();
         
         String message = result['message'] ?? 'OTP sent successfully';
         _showSnackBar(message, Colors.green);
+        
+        print('✅ OTP resent successfully');
       } else {
         String errorMessage = result['message'] ?? 'Failed to resend OTP';
         String errorType = result['error'] ?? '';
@@ -315,6 +349,15 @@ void _verifyOTP() async {
           int waitTime = result['waitTime'] ?? 30;
           errorMessage = 'Please wait $waitTime seconds before requesting another OTP';
           _showSnackBar(errorMessage, Colors.orange);
+          
+          // Update countdown to match server rate limit
+          setState(() {
+            _resendCountdown = waitTime;
+          });
+        } else if (errorType == 'user_not_found') {
+          _showSnackBar('User not found. Please go back and try again.', Colors.red);
+        } else if (errorType == 'timeout') {
+          _showSnackBar('Request timed out. Please check your internet connection and try again.', Colors.red);
         } else {
           _showSnackBar(errorMessage, Colors.red);
         }
@@ -425,6 +468,13 @@ void _verifyOTP() async {
                       borderRadius: BorderRadius.circular(8),
                       borderSide: const BorderSide(
                         color: kPrimaryColor,
+                        width: 2,
+                      ),
+                    ),
+                    errorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: Colors.red,
                         width: 2,
                       ),
                     ),
@@ -547,13 +597,13 @@ void _verifyOTP() async {
           
           // Back to Login/Signup
           TextButton(
-            onPressed: () {
+            onPressed: _isVerifying ? null : () {
               Navigator.pop(context);
             },
             child: Text(
               widget.isNewUser ? "← Back to Sign Up" : "← Back to Login",
-              style: const TextStyle(
-                color: kPrimaryColor,
+              style: TextStyle(
+                color: _isVerifying ? Colors.grey : kPrimaryColor,
               ),
             ),
           ),

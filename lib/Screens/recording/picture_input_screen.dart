@@ -1,15 +1,17 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'dart:io';
 import '../../constants.dart';
-import '../../services/api_service.dart'; 
+import '../../services/api_service.dart';
+import '../../services/token_storage_service.dart'; // Add this import
 
 class PictureInputScreen extends StatefulWidget {
   final String? selectedCategory;
-  final String? categoryId; // Add category ID for API
-  final String? userId; // Add user ID for API
+  final String? categoryId;
+  final String? userId;
   
   const PictureInputScreen({
     Key? key,
@@ -24,19 +26,29 @@ class PictureInputScreen extends StatefulWidget {
 
 class _PictureInputScreenState extends State<PictureInputScreen> {
   final TextEditingController _captionController = TextEditingController();
-  final TextEditingController _titleController = TextEditingController(); // Add title controller
+  final TextEditingController _titleController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
+  
   List<XFile> _selectedImages = [];
   bool _isProcessing = false;
   bool _isUploading = false;
+  bool _isLoadingLocation = false;
   String _selectedLanguage = 'Telugu';
   int _captionWordCount = 0;
-  String? _createdRecordId; // Store the created record ID
+  String? _createdRecordId;
+  String? _currentUserId;
+  
+  // Location variables
+  double? _currentLatitude;
+  double? _currentLongitude;
+  String _locationStatus = 'Location not available';
 
   @override
   void initState() {
     super.initState();
     _captionController.addListener(_updateCaptionWordCount);
+    _getCurrentLocation();
+    _loadUserData();
   }
 
   @override
@@ -47,11 +59,84 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
     super.dispose();
   }
 
+  // Load user data from storage
+  Future<void> _loadUserData() async {
+    try {
+      _currentUserId = await TokenStorageService.getUserId();
+      if (_currentUserId == null) {
+        _showSnackBar('User not authenticated. Please login again.', Colors.red);
+      }
+    } catch (e) {
+      print('Error loading user data: $e');
+    }
+  }
+
   void _updateCaptionWordCount() {
     final text = _captionController.text.trim();
     setState(() {
       _captionWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
     });
+  }
+
+  // Location Services
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLoadingLocation = true;
+      _locationStatus = 'Getting location...';
+    });
+
+    try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        setState(() {
+          _locationStatus = 'Location services are disabled';
+          _isLoadingLocation = false;
+        });
+        return;
+      }
+
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _locationStatus = 'Location permissions are denied';
+            _isLoadingLocation = false;
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _locationStatus = 'Location permissions are permanently denied';
+          _isLoadingLocation = false;
+        });
+        return;
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _currentLatitude = position.latitude;
+        _currentLongitude = position.longitude;
+        _locationStatus = 'Location: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+        _isLoadingLocation = false;
+      });
+
+      _showSnackBar('Location obtained successfully', Colors.green);
+    } catch (e) {
+      setState(() {
+        _locationStatus = 'Failed to get location: $e';
+        _isLoadingLocation = false;
+      });
+      _showSnackBar('Failed to get location: $e', Colors.red);
+    }
   }
 
   Future<void> _pickImageFromCamera() async {
@@ -116,22 +201,45 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       return;
     }
 
+    // Check authentication
+    final isAuthenticated = await TokenStorageService.isAuthenticated();
+    if (!isAuthenticated) {
+      _showSnackBar('Please login again to continue', Colors.red);
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
     });
 
     try {
-      // First create a record
+      // Get file info from first image for the record
+      final firstImage = File(_selectedImages.first.path);
+      final fileSize = await firstImage.length();
+      final fileName = _selectedImages.first.name;
+
+      // Use the stored user ID or fallback to widget parameter
+      final userId = _currentUserId ?? widget.userId ?? 'default_user';
+
+      // Create a record with proper schema
       final recordResponse = await ApiService.createRecord(
         title: _titleController.text.trim(),
         description: _captionController.text.trim(),
-        categoryId: widget.categoryId ?? '1', // Default category ID if not provided
-        userId: widget.userId ?? 'default_user', // Default user ID if not provided
+        categoryId: widget.categoryId ?? '1',
+        userId: userId,
         mediaType: 'image',
+        latitude: _currentLatitude,
+        longitude: _currentLongitude,
+        fileName: fileName,
+        fileSize: fileSize,
       );
 
       if (recordResponse['success'] == true) {
-        _createdRecordId = recordResponse['data']['id']?.toString();
+        // Extract record ID from response
+        final responseData = recordResponse['data'];
+        _createdRecordId = responseData['id']?.toString() ?? 
+                          responseData['record_id']?.toString();
+        
         setState(() {
           _isProcessing = false;
         });
@@ -140,10 +248,16 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
         setState(() {
           _isProcessing = false;
         });
-        _showSnackBar(
-          recordResponse['message'] ?? 'Failed to create record',
-          Colors.red,
-        );
+        
+        // Handle authentication errors specifically
+        if (recordResponse['error']?.toString().toLowerCase().contains('authenticated') == true) {
+          _showSnackBar('Session expired. Please login again.', Colors.red);
+        } else {
+          _showSnackBar(
+            recordResponse['message'] ?? 'Failed to create record',
+            Colors.red,
+          );
+        }
       }
     } catch (e) {
       setState(() {
@@ -169,6 +283,8 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
               Text('Language: $_selectedLanguage'),
               if (widget.selectedCategory != null)
                 Text('Category: ${widget.selectedCategory}'),
+              if (_currentLatitude != null && _currentLongitude != null)
+                Text('Location: ${_currentLatitude!.toStringAsFixed(4)}, ${_currentLongitude!.toStringAsFixed(4)}'),
               const SizedBox(height: 16),
               const Text('Are you ready to upload your images?'),
             ],
@@ -221,6 +337,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
           successCount++;
         } else {
           failureCount++;
+          print('Upload failed for image $i: ${uploadResponse['message']}');
         }
       } catch (e) {
         failureCount++;
@@ -241,6 +358,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       if (failureCount == 0) {
         // All images uploaded successfully, navigate back
         Future.delayed(const Duration(seconds: 2), () {
+          // ignore: use_build_context_synchronously
           Navigator.pop(context);
         });
       }
@@ -257,19 +375,33 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       return;
     }
 
+    // Check authentication
+    final isAuthenticated = await TokenStorageService.isAuthenticated();
+    if (!isAuthenticated) {
+      _showSnackBar('Please login again to save draft', Colors.red);
+      return;
+    }
+
     setState(() {
       _isProcessing = true;
     });
 
     try {
+      // Use the stored user ID or fallback to widget parameter
+      final userId = _currentUserId ?? widget.userId ?? 'default_user';
+      
       final recordResponse = await ApiService.createRecord(
         title: _titleController.text.trim().isEmpty 
             ? 'Draft - ${DateTime.now().toString().substring(0, 16)}' 
             : 'Draft - ${_titleController.text.trim()}',
         description: _captionController.text.trim(),
         categoryId: widget.categoryId ?? '1',
-        userId: widget.userId ?? 'default_user',
+        userId: userId,
         mediaType: 'image',
+        latitude: _currentLatitude,
+        longitude: _currentLongitude,
+        fileName: 'draft',
+        fileSize: 0,
       );
 
       setState(() {
@@ -363,7 +495,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header Info
+            // Header Info with Location
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(16),
@@ -432,13 +564,54 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                       color: Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Add title, select images and write captions',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey,
-                    ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        _isLoadingLocation 
+                            ? Icons.location_searching 
+                            : (_currentLatitude != null 
+                                ? Icons.location_on 
+                                : Icons.location_off),
+                        size: 16,
+                        color: _isLoadingLocation 
+                            ? Colors.orange 
+                            : (_currentLatitude != null 
+                                ? Colors.green 
+                                : Colors.red),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _locationStatus,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _isLoadingLocation 
+                                ? Colors.orange 
+                                : (_currentLatitude != null 
+                                    ? Colors.green 
+                                    : Colors.red),
+                          ),
+                        ),
+                      ),
+                      if (_isLoadingLocation)
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                          ),
+                        )
+                      else if (_currentLatitude == null)
+                        IconButton(
+                          onPressed: _getCurrentLocation,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          color: kPrimaryColor,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -447,11 +620,44 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
             // Main Content
             Expanded(
               child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Title Input
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            offset: const Offset(0, 2),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: TextField(
+                        controller: _titleController,
+                        decoration: const InputDecoration(
+                          labelText: 'Title',
+                          hintText: 'Enter a catchy title for your post',
+                          border: InputBorder.none,
+                          labelStyle: TextStyle(
+                            color: kPrimaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        maxLines: 1,
+                        textCapitalization: TextCapitalization.sentences,
+                      ),
+                    ),
+
+                    // Image Selection Section
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -467,110 +673,80 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.title, color: kPrimaryColor),
-                              SizedBox(width: 8),
-                              Text(
-                                'Title *',
+                              const Icon(Icons.photo_camera, 
+                                  color: kPrimaryColor, size: 20),
+                              const SizedBox(width: 8),
+                              const Text(
+                                'Add Images',
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                                  fontWeight: FontWeight.w600,
+                                  color: kPrimaryColor,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                '${_selectedImages.length}/10',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 16),
-                          TextField(
-                            controller: _titleController,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              height: 1.5,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: _selectedLanguage == 'Telugu' 
-                                  ? 'మీ పోస్ట్ కు శీర్షిక రాయండి...'
-                                  : 'Enter a title for your post...',
-                              hintStyle: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 16,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: kPrimaryColor),
-                              ),
-                              contentPadding: const EdgeInsets.all(12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Image Selection Buttons
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _buildImageSourceButton(
-                              icon: Icons.camera_alt,
-                              label: 'Take Photo',
-                              onTap: _pickImageFromCamera,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildImageSourceButton(
-                              icon: Icons.photo_library,
-                              label: 'Choose from Gallery',
-                              onTap: _pickImageFromGallery,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Selected Images Grid
-                    if (_selectedImages.isNotEmpty) ...[
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              offset: const Offset(0, 2),
-                              blurRadius: 8,
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.photo, color: kPrimaryColor),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Selected Images (${_selectedImages.length}/10)',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
+                          
+                          // Image Selection Buttons
+                          Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: _pickImageFromCamera,
+                                  icon: const Icon(Icons.camera_alt),
+                                  label: const Text('Camera'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: kPrimaryColor,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
                                   ),
                                 ),
-                              ],
-                            ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: _pickImageFromGallery,
+                                  icon: const Icon(Icons.photo_library),
+                                  label: const Text('Gallery'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: kPrimaryColor,
+                                    side: const BorderSide(color: kPrimaryColor),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+
+                          // Selected Images Grid
+                          if (_selectedImages.isNotEmpty) ...[
                             const SizedBox(height: 16),
+                            const Divider(),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Selected Images (${_selectedImages.length})',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
                             GridView.builder(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
@@ -578,6 +754,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                                 crossAxisCount: 3,
                                 crossAxisSpacing: 8,
                                 mainAxisSpacing: 8,
+                                childAspectRatio: 1,
                               ),
                               itemCount: _selectedImages.length,
                               itemBuilder: (context, index) {
@@ -598,11 +775,11 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                                       child: GestureDetector(
                                         onTap: () => _removeImage(index),
                                         child: Container(
-                                          padding: const EdgeInsets.all(4),
                                           decoration: const BoxDecoration(
                                             color: Colors.red,
                                             shape: BoxShape.circle,
                                           ),
+                                          padding: const EdgeInsets.all(4),
                                           child: const Icon(
                                             Icons.close,
                                             color: Colors.white,
@@ -616,14 +793,13 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                               },
                             ),
                           ],
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 16),
-                    ],
+                    ),
 
                     // Caption Input
                     Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -641,224 +817,144 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.edit, color: kPrimaryColor),
+                              const Icon(Icons.edit_note, 
+                                  color: kPrimaryColor, size: 20),
                               const SizedBox(width: 8),
                               const Text(
-                                'Add Caption',
+                                'Caption',
                                 style: TextStyle(
                                   fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                                  fontWeight: FontWeight.w600,
+                                  color: kPrimaryColor,
                                 ),
                               ),
                               const Spacer(),
                               Text(
-                                'Words: $_captionWordCount',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
+                                '$_captionWordCount words',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           TextField(
                             controller: _captionController,
-                            maxLines: 4,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              height: 1.5,
+                            decoration: const InputDecoration(
+                              hintText: 'Share your thoughts, story, or context...',
+                              border: InputBorder.none,
+                              hintStyle: TextStyle(color: Colors.grey),
                             ),
-                            decoration: InputDecoration(
-                              hintText: _selectedLanguage == 'Telugu' 
-                                  ? 'మీ చిత్రాలకు వివరణ రాయండి...'
-                                  : 'Write a caption for your images...',
-                              hintStyle: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 16,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: kPrimaryColor),
-                              ),
-                              contentPadding: const EdgeInsets.all(12),
-                            ),
+                            maxLines: 6,
+                            textCapitalization: TextCapitalization.sentences,
                           ),
                         ],
                       ),
                     ),
+
+                    const SizedBox(height: 20),
                   ],
                 ),
               ),
             ),
 
-            // Bottom Controls
+            // Bottom Action Buttons
             Container(
               padding: const EdgeInsets.all(16),
-              child: Column(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    offset: const Offset(0, -2),
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+              child: Row(
                 children: [
-                  // Process Button
-                  GestureDetector(
-                    onTap: (_isProcessing || _isUploading) ? null : _processImages,
-                    child: Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        color: (_isProcessing || _isUploading) ? Colors.grey : kPrimaryColor,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: ((_isProcessing || _isUploading) ? Colors.grey : kPrimaryColor)
-                                .withOpacity(0.3),
-                            offset: const Offset(0, 4),
-                            blurRadius: 12,
-                          ),
-                        ],
+                  // Save Draft Button
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _isProcessing || _isUploading ? null : _saveDraft,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: kPrimaryColor,
+                        side: const BorderSide(color: kPrimaryColor),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      child: (_isProcessing || _isUploading)
-                          ? const CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 3,
+                      child: _isProcessing && !_isUploading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(kPrimaryColor),
+                              ),
                             )
-                          : const Icon(
-                              Icons.cloud_upload,
-                              color: Colors.white,
-                              size: 36,
-                            ),
+                          : const Text('Save Draft'),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _isUploading 
-                        ? 'Uploading images...' 
-                        : _isProcessing 
-                            ? 'Creating record...' 
-                            : 'Tap to create & upload',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      color: Colors.grey,
+                  const SizedBox(width: 12),
+                  
+                  // Process/Upload Button
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _isProcessing || _isUploading 
+                          ? null 
+                          : (_createdRecordId != null ? _uploadImages : _processImages),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kPrimaryColor,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: _isUploading
+                          ? const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Text('Uploading...'),
+                              ],
+                            )
+                          : _isProcessing
+                              ? const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Processing...'),
+                                  ],
+                                )
+                              : Text(_createdRecordId != null ? 'Upload Images' : 'Process & Upload'),
                     ),
-                  ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Action Buttons Row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _buildActionButton(
-                        icon: Icons.save_outlined,
-                        label: 'Save Draft',
-                        onTap: _isProcessing ? null : _saveDraft,
-                      ),
-                      _buildActionButton(
-                        icon: Icons.auto_fix_high,
-                        label: 'Auto Caption',
-                        onTap: () => _showSnackBar('Auto caption feature coming soon', Colors.blue),
-                      ),
-                      _buildActionButton(
-                        icon: Icons.palette,
-                        label: 'Add Filter',
-                        onTap: () => _showSnackBar('Filter feature coming soon', Colors.purple),
-                      ),
-                    ],
                   ),
                 ],
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildImageSourceButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: kPrimaryColor.withOpacity(0.3)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              offset: const Offset(0, 2),
-              blurRadius: 8,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: kPrimaryColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                icon,
-                color: kPrimaryColor,
-                size: 24,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              color: onTap == null ? Colors.grey[200] : Colors.grey[100],
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.grey[300]!),
-            ),
-            child: Icon(
-              icon,
-              color: onTap == null ? Colors.grey : kPrimaryColor,
-              size: 24,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: onTap == null ? Colors.grey : Colors.grey[600],
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
       ),
     );
   }

@@ -105,6 +105,27 @@ class TokenStorageService {
     return token != null && await isTokenValid();
   }
 
+  // Clear all stored authentication tokens and data
+  static Future<bool> clearTokens() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      await prefs.remove(_tokenKey);
+      await prefs.remove(_tokenTypeKey);
+      await prefs.remove(_userIdKey);
+      await prefs.remove(_phoneNumberKey);
+      await prefs.remove(_userNameKey);
+      await prefs.remove(_refreshTokenKey);
+      await prefs.remove(_tokenExpiryKey);
+      
+      print('Auth tokens cleared successfully');
+      return true;
+    } catch (e) {
+      print('Error clearing auth tokens: $e');
+      return false;
+    }
+  }
+
   // Get all stored user data
   static Future<Map<String, String?>> getUserData() async {
     try {
@@ -125,25 +146,9 @@ class TokenStorageService {
     }
   }
 
-  // Clear all stored authentication data
+  // Clear all stored authentication data (alias for clearTokens for backward compatibility)
   static Future<bool> clearAuthData() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      
-      await prefs.remove(_tokenKey);
-      await prefs.remove(_tokenTypeKey);
-      await prefs.remove(_userIdKey);
-      await prefs.remove(_phoneNumberKey);
-      await prefs.remove(_userNameKey);
-      await prefs.remove(_refreshTokenKey);
-      await prefs.remove(_tokenExpiryKey);
-      
-      print('Auth data cleared successfully');
-      return true;
-    } catch (e) {
-      print('Error clearing auth data: $e');
-      return false;
-    }
+    return await clearTokens();
   }
 
   // Update token expiry time
@@ -191,6 +196,82 @@ class TokenStorageService {
     }
   }
 
+  // Get refresh token
+  static Future<String?> getRefreshToken() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_refreshTokenKey);
+    } catch (e) {
+      print('Error getting refresh token: $e');
+      return null;
+    }
+  }
+
+  // Get token expiry date
+  static Future<DateTime?> getTokenExpiry() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final expiryString = prefs.getString(_tokenExpiryKey);
+      
+      if (expiryString != null) {
+        return DateTime.parse(expiryString);
+      }
+      
+      return null;
+    } catch (e) {
+      print('Error getting token expiry: $e');
+      return null;
+    }
+  }
+
+  // Check if token will expire within a given duration
+  static Future<bool> willTokenExpireSoon({Duration threshold = const Duration(minutes: 5)}) async {
+    try {
+      final expiry = await getTokenExpiry();
+      if (expiry == null) return true;
+      
+      final now = DateTime.now();
+      final expiryThreshold = expiry.subtract(threshold);
+      
+      return now.isAfter(expiryThreshold);
+    } catch (e) {
+      print('Error checking token expiry threshold: $e');
+      return true;
+    }
+  }
+
+  // Refresh token if it's about to expire (placeholder - implement based on your API)
+  static Future<bool> refreshTokenIfNeeded() async {
+    try {
+      if (await willTokenExpireSoon()) {
+        final refreshToken = await getRefreshToken();
+        if (refreshToken != null) {
+          // TODO: Implement actual token refresh logic based on your API
+          print('Token refresh needed but not implemented');
+          return false;
+        }
+      }
+      return true;
+    } catch (e) {
+      print('Error refreshing token: $e');
+      return false;
+    }
+  }
+
+  // Store user ID separately (for compatibility with text_input_screen.dart)
+  static Future<bool> storeUserId(String userId) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_userIdKey, userId);
+      // Also store with alternative key for compatibility
+      await prefs.setString('userId', userId);
+      return true;
+    } catch (e) {
+      print('Error storing user ID: $e');
+      return false;
+    }
+  }
+
   // Print stored auth data for debugging
   static Future<void> debugPrintAuthData() async {
     final userData = await getUserData();
@@ -202,6 +283,15 @@ class TokenStorageService {
         print('$key: $value');
       }
     });
+    
+    // Additional debug info
+    final isAuth = await isAuthenticated();
+    final tokenValid = await isTokenValid();
+    final willExpire = await willTokenExpireSoon();
+    
+    print('isAuthenticated: $isAuth');
+    print('isTokenValid: $tokenValid');
+    print('willExpireSoon: $willExpire');
     print('========================');
   }
 }

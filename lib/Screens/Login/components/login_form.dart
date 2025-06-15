@@ -102,7 +102,7 @@ class _LoginFormState extends State<LoginForm> {
         
         if (errorType == 'rate_limit_client_side' || errorType == 'rate_limit_server_side') {
           // Handle rate limiting
-          int waitTime = otpResult['waitTime'] ?? 30;
+          int waitTime = otpResult['waitTime'] ?? 20;
           _showSnackBar(
             'Please wait $waitTime seconds before requesting another OTP',
             Colors.orange,

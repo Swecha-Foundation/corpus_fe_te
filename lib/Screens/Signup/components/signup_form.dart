@@ -80,23 +80,43 @@ class _SignUpFormState extends State<SignUpForm> {
   }
 
   void _showSnackBar(String message, Color backgroundColor, {SnackBarAction? action}) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: backgroundColor,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          action: action,
-        ),
-      );
+    // Enhanced mounted check with context validation
+    if (!mounted) return;
+    
+    try {
+      // Use a post-frame callback to ensure the widget tree is stable
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && context.mounted) {
+          try {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message),
+                backgroundColor: backgroundColor,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                action: action,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          } catch (e) {
+            print('Error showing snackbar: $e');
+            // Fallback - just print the message
+            print('Message: $message');
+          }
+        }
+      });
+    } catch (e) {
+      print('Error in _showSnackBar: $e');
+      print('Message: $message');
     }
   }
 
   // Check if user exists when phone number field loses focus
   void _checkIfUserExists() async {
+    if (!mounted) return;
+    
     String phoneNumber = _phoneController.text.trim();
     
     if (phoneNumber.length == 10) {
@@ -107,6 +127,8 @@ class _SignUpFormState extends State<SignUpForm> {
       try {
         final userExistsResult = await UserApiService.checkUserExists(phoneNumber);
         
+        if (!mounted) return;
+        
         if (userExistsResult['success']) {
           // User already exists
           _showSnackBar(
@@ -116,7 +138,7 @@ class _SignUpFormState extends State<SignUpForm> {
               label: 'Login',
               textColor: Colors.white,
               onPressed: () {
-                if (mounted) {
+                if (mounted && context.mounted) {
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(
@@ -149,6 +171,8 @@ class _SignUpFormState extends State<SignUpForm> {
       return;
     }
 
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
     });
@@ -165,8 +189,10 @@ class _SignUpFormState extends State<SignUpForm> {
       // Check if user already exists before creating
       final userExistsResult = await UserApiService.checkUserExists(phoneNumber);
       
+      if (!mounted) return;
+      
       if (userExistsResult['success']) {
-        // User already exists
+        // User already exists - show message and navigate to login
         _showSnackBar(
           'Account with this phone number already exists. Please login instead.',
           Colors.orange,
@@ -174,7 +200,7 @@ class _SignUpFormState extends State<SignUpForm> {
             label: 'Login',
             textColor: Colors.white,
             onPressed: () {
-              if (mounted) {
+              if (mounted && context.mounted) {
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(
@@ -189,6 +215,7 @@ class _SignUpFormState extends State<SignUpForm> {
       }
       
       // User doesn't exist, proceed with creation
+      print('Creating user...');
       final createUserResult = await UserApiService.createUser(
         phone: phoneNumber,
         name: name,
@@ -199,49 +226,27 @@ class _SignUpFormState extends State<SignUpForm> {
         password: password,
       );
       
+      if (!mounted) return;
+      
       if (createUserResult['success']) {
-        print('User created successfully');
+        print('User created successfully, navigating to OTP screen');
         
-        // User created successfully, now send OTP
-        final otpResult = await OTPApiService.sendOTP(phoneNumber);
+        // Show success message without waiting for it to complete
+        _showSnackBar('Account created successfully! Please verify your phone number.', Colors.green);
         
-        if (otpResult['success']) {
-          print('OTP sent successfully');
-          // Navigate to OTP screen
-          _showSnackBar('Account created successfully! Please verify your phone number.', Colors.green);
-          
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (context) => OTPScreen(
-                  phoneNumber: phoneNumber,
-                  name: name,
-                  isNewUser: true,
-                  userData: createUserResult['data'],
-                ),
+        // Navigate to OTP screen with user data - use a small delay to ensure UI updates
+        await Future.delayed(const Duration(milliseconds: 500));
+        
+        if (mounted && context.mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OTPScreen(
+                phoneNumber: phoneNumber,
+                name: name,
+                isNewUser: true,
+                userData: createUserResult['data'],
               ),
-            );
-          }
-        } else {
-          print('OTP sending failed: ${otpResult['message']}');
-          // Account created but OTP failed
-          _showSnackBar(
-            'Account created but failed to send OTP. Please try logging in.',
-            Colors.orange,
-            action: SnackBarAction(
-              label: 'Login',
-              textColor: Colors.white,
-              onPressed: () {
-                if (mounted) {
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const LoginScreen(),
-                    ),
-                  );
-                }
-              },
             ),
           );
         }
@@ -257,7 +262,7 @@ class _SignUpFormState extends State<SignUpForm> {
               label: 'Login',
               textColor: Colors.white,
               onPressed: () {
-                if (mounted) {
+                if (mounted && context.mounted) {
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(
@@ -270,15 +275,25 @@ class _SignUpFormState extends State<SignUpForm> {
           );
         } else {
           // Other creation errors
-          _showSnackBar(
-            'Failed to create account: ${createUserResult['message']}',
-            Colors.red,
-          );
+          String errorMessage = createUserResult['message'] ?? 'Failed to create account';
+          
+          // Handle common backend errors
+          if (errorMessage.toLowerCase().contains('email') && errorMessage.toLowerCase().contains('already')) {
+            errorMessage = 'Email address already in use. Please use a different email.';
+          } else if (errorMessage.toLowerCase().contains('phone') && errorMessage.toLowerCase().contains('already')) {
+            errorMessage = 'Phone number already in use. Please login instead.';
+          } else if (errorMessage.toLowerCase().contains('validation')) {
+            errorMessage = 'Please check your information and try again.';
+          }
+          
+          _showSnackBar(errorMessage, Colors.red);
         }
       }
     } catch (e) {
       print('Sign up error: $e');
-      _showSnackBar('An error occurred. Please try again.', Colors.red);
+      if (mounted) {
+        _showSnackBar('An error occurred. Please try again.', Colors.red);
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -454,7 +469,9 @@ class _SignUpFormState extends State<SignUpForm> {
                 // Check for existing user when phone number is complete
                 if (value.length == 10) {
                   Future.delayed(const Duration(milliseconds: 500), () {
-                    _checkIfUserExists();
+                    if (mounted) {
+                      _checkIfUserExists();
+                    }
                   });
                 }
               },

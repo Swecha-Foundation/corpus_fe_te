@@ -9,13 +9,14 @@ import 'package:http_parser/http_parser.dart';
 // ignore: depend_on_referenced_packages
 import 'package:mime/mime.dart';
 import 'token_storage_service.dart'; 
+import 'uuid_service.dart';
 
 class ApiService {
   static const String baseUrl = 'https://backend2.swecha.org';
   static const String apiVersion = '/api/v1';
   
-  // Headers for API requests with authentication
-  static Future<Map<String, String>> _getHeaders() async {
+  // Headers for API requests with authentication (made public)
+  static Future<Map<String, String>> getHeaders() async {
     final authHeader = await TokenStorageService.getAuthorizationHeader();
     final headers = {
       'Content-Type': 'application/json',
@@ -30,6 +31,11 @@ class ApiService {
     }
     
     return headers;
+  }
+
+  // Private method for backward compatibility
+  static Future<Map<String, String>> _getHeaders() async {
+    return await getHeaders();
   }
 
   // Headers for multipart requests (without Content-Type)
@@ -299,7 +305,6 @@ class ApiService {
       if (title != null) body['title'] = title;
       if (description != null) body['description'] = description;
       if (categoryId != null) body['category_id'] = categoryId;
-      
       // Add location as nested object if coordinates are provided
       if (latitude != null && longitude != null) {
         body['location'] = {
@@ -313,6 +318,8 @@ class ApiService {
         headers: headers,
         body: jsonEncode(body),
       );
+
+      print('Update record response: ${response.statusCode} - ${response.body}'); // Debug log
 
       if (response.statusCode == 200) {
         return {
@@ -328,6 +335,7 @@ class ApiService {
         };
       }
     } catch (e) {
+      print('Update record error: $e'); // Debug log
       return {
         'success': false,
         'error': 'Network error: $e',
@@ -353,6 +361,8 @@ class ApiService {
       final headers = await _getHeaders();
       final response = await http.delete(url, headers: headers);
 
+      print('Delete record response: ${response.statusCode} - ${response.body}'); // Debug log
+
       if (response.statusCode == 200 || response.statusCode == 204) {
         return {
           'success': true,
@@ -366,6 +376,7 @@ class ApiService {
         };
       }
     } catch (e) {
+      print('Delete record error: $e'); // Debug log
       return {
         'success': false,
         'error': 'Network error: $e',
@@ -374,24 +385,88 @@ class ApiService {
     }
   }
 
-  // Search records nearby (if location-based search is needed)
-  static Future<Map<String, dynamic>> searchRecordsNearby({
-    required double latitude,
-    required double longitude,
-    double? radius,
+  // Get user's own records
+  static Future<Map<String, dynamic>> getUserRecords({
+    String? categoryId,
+    String? mediaType,
+    int skip = 0,
+    int limit = 100,
   }) async {
     try {
-      final queryParams = <String, String>{
-        'latitude': latitude.toString(),
-        'longitude': longitude.toString(),
-      };
-      
-      if (radius != null) queryParams['radius'] = radius.toString();
+      // Get current user ID from UuidService
+      final userId = await UuidService.getCurrentUserId();
+      if (userId == null) {
+        return {
+          'success': false,
+          'error': 'User not authenticated',
+          'message': 'Please login again'
+        };
+      }
 
-      final url = Uri.parse('$baseUrl$apiVersion/records/search/nearby').replace(
-        queryParameters: queryParams,
+      return await getRecords(
+        categoryId: categoryId,
+        userId: userId,
+        mediaType: mediaType,
+        skip: skip,
+        limit: limit,
       );
+    } catch (e) {
+      return {
+        'success': false,
+        'error': 'Error getting user records: $e',
+        'message': 'Failed to retrieve your records'
+      };
+    }
+  }
 
+  // Create record with UUID service integration
+  static Future<Map<String, dynamic>> createRecordWithUuids({
+    required String title,
+    required String description,
+    String? categoryName, // Use category name instead of ID
+    required String mediaType,
+    double? latitude,
+    double? longitude,
+    String? fileName,
+    int? fileSize,
+  }) async {
+    try {
+      // Get current user ID and category UUID
+      final userId = await UuidService.getCurrentUserId();
+      final categoryId = await UuidService.getCategoryUuid(categoryName);
+
+      if (userId == null) {
+        return {
+          'success': false,
+          'error': 'User not authenticated',
+          'message': 'Please login again'
+        };
+      }
+
+      return await createRecord(
+        title: title,
+        description: description,
+        categoryId: categoryId,
+        userId: userId,
+        mediaType: mediaType,
+        latitude: latitude,
+        longitude: longitude,
+        fileName: fileName,
+        fileSize: fileSize,
+      );
+    } catch (e) {
+      return {
+        'success': false,
+        'error': 'Error creating record: $e',
+        'message': 'Failed to create record'
+      };
+    }
+  }
+
+  // Get categories from API (used by UuidService)
+  static Future<Map<String, dynamic>> getCategories() async {
+    try {
+      final url = Uri.parse('$baseUrl$apiVersion/categories/');
       final headers = await _getHeaders();
       final response = await http.get(url, headers: headers);
 
@@ -399,12 +474,12 @@ class ApiService {
         return {
           'success': true,
           'data': jsonDecode(response.body),
-          'message': 'Nearby records retrieved successfully'
+          'message': 'Categories retrieved successfully'
         };
       } else {
         return {
           'success': false,
-          'error': 'Failed to search nearby records: ${response.statusCode}',
+          'error': 'Failed to get categories: ${response.statusCode}',
           'message': response.body
         };
       }
@@ -415,5 +490,140 @@ class ApiService {
         'message': 'Please check your internet connection'
       };
     }
+  }
+
+  // Get current user info from API (used by UuidService)
+  static Future<Map<String, dynamic>> getCurrentUser() async {
+    try {
+      final url = Uri.parse('$baseUrl$apiVersion/users/me');
+      final headers = await _getHeaders();
+      final response = await http.get(url, headers: headers);
+
+      print('Get current user response: ${response.statusCode} - ${response.body}'); // Debug log
+
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+          'message': 'User info retrieved successfully'
+        };
+      } else {
+        return {
+          'success': false,
+          'error': 'Failed to get user info: ${response.statusCode}',
+          'message': response.body
+        };
+      }
+    } catch (e) {
+      print('Get current user error: $e'); // Debug log
+      return {
+        'success': false,
+        'error': 'Network error: $e',
+        'message': 'Please check your internet connection'
+      };
+    }
+  }
+
+  // Upload file with progress callback
+  static Future<Map<String, dynamic>> uploadRecordWithProgress({
+    required String recordId,
+    required File file,
+    String? description,
+    Function(double progress)? onProgress,
+  }) async {
+    try {
+      // Check if user is authenticated
+      final isAuthenticated = await TokenStorageService.isAuthenticated();
+      if (!isAuthenticated) {
+        return {
+          'success': false,
+          'error': 'User not authenticated',
+          'message': 'Please login again'
+        };
+      }
+
+      final url = Uri.parse('$baseUrl$apiVersion/records/upload');
+      
+      var request = http.MultipartRequest('POST', url);
+      
+      // Add headers (excluding Content-Type as it's set automatically for multipart)
+      final headers = await _getMultipartHeaders();
+      request.headers.addAll(headers);
+
+      // Add form fields
+      request.fields['record_id'] = recordId;
+      if (description != null) {
+        request.fields['description'] = description;
+      }
+
+      // Add file
+      String? mimeType = lookupMimeType(file.path);
+      var multipartFile = await http.MultipartFile.fromPath(
+        'file',
+        file.path,
+        contentType: mimeType != null ? MediaType.parse(mimeType) : null,
+      );
+      request.files.add(multipartFile);
+
+      print('Uploading file for record: $recordId'); // Debug log
+
+      var streamedResponse = await request.send();
+      
+      // Listen to upload progress if callback provided
+      if (onProgress != null) {
+        streamedResponse.stream.listen(
+          (List<int> chunk) {
+            // Calculate progress based on bytes sent
+            // Note: This is a simplified progress calculation
+            // For more accurate progress, you might need a different approach
+          },
+          onDone: () {
+            onProgress(1.0); // Upload complete
+          },
+        );
+      }
+
+      var response = await http.Response.fromStream(streamedResponse);
+
+      print('Upload response: ${response.statusCode} - ${response.body}'); // Debug log
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return {
+          'success': true,
+          'data': jsonDecode(response.body),
+          'message': 'File uploaded successfully'
+        };
+      } else {
+        return {
+          'success': false,
+          'error': 'Failed to upload file: ${response.statusCode}',
+          'message': response.body
+        };
+      }
+    } catch (e) {
+      print('Upload error: $e'); // Debug log
+      return {
+        'success': false,
+        'error': 'Upload error: $e',
+        'message': 'Failed to upload file'
+      };
+    }
+  }
+
+  // Validate server connection
+  static Future<bool> validateConnection() async {
+    try {
+      final url = Uri.parse('$baseUrl/health'); // Assuming health check endpoint
+      final response = await http.get(url).timeout(const Duration(seconds: 5));
+      return response.statusCode == 200;
+    } catch (e) {
+      print('Connection validation failed: $e');
+      return false;
+    }
+  }
+
+  // Clear all cached data
+  static void clearCache() {
+    UuidService.clearCache();
   }
 }

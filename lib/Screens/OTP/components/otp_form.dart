@@ -41,13 +41,6 @@ class _OTPFormState extends State<OTPForm> {
   void initState() {
     super.initState();
     _startResendCountdown();
-    
-    // Auto-focus on first field
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        FocusScope.of(context).requestFocus(_focusNodes[0]);
-      }
-    });
   }
   
   @override
@@ -91,12 +84,7 @@ class _OTPFormState extends State<OTPForm> {
         _focusNodes[index].unfocus();
         // Auto-verify when all digits are entered
         if (_isOTPComplete() && !_isVerifying) {
-          // Small delay to show the complete OTP before verification
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (mounted && _isOTPComplete() && !_isVerifying) {
-              _verifyOTP();
-            }
-          });
+          _verifyOTP();
         }
       }
     }
@@ -116,7 +104,7 @@ class _OTPFormState extends State<OTPForm> {
     return _getOTPCode().length == 6;
   }
   
-  void _showSnackBar(String message, Color backgroundColor, {SnackBarAction? action}) {
+  void _showSnackBar(String message, Color backgroundColor) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -126,19 +114,9 @@ class _OTPFormState extends State<OTPForm> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
-          action: action,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 3),
         ),
       );
-    }
-  }
-  
-  void _clearOTPFields() {
-    for (var controller in _controllers) {
-      controller.clear();
-    }
-    if (mounted) {
-      FocusScope.of(context).requestFocus(_focusNodes[0]);
     }
   }
   
@@ -266,7 +244,6 @@ class _OTPFormState extends State<OTPForm> {
       } else {
         // Show error message
         String errorMessage = result['message'] ?? 'OTP verification failed';
-        String errorType = result['error'] ?? '';
         
         // Provide user-friendly error messages
         if (errorMessage.toLowerCase().contains('invalid') ||
@@ -275,29 +252,30 @@ class _OTPFormState extends State<OTPForm> {
           errorMessage = 'Invalid OTP. Please check and try again.';
         } else if (errorMessage.toLowerCase().contains('expired')) {
           errorMessage = 'OTP has expired. Please request a new one.';
-          // Auto-clear fields and show resend option
-          _clearOTPFields();
-          if (_resendCountdown > 0) {
-            setState(() {
-              _resendCountdown = 0;
-            });
-          }
-        } else if (errorType == 'timeout') {
-          errorMessage = 'Request timed out. Please check your internet connection and try again.';
         }
         
         _showSnackBar(errorMessage, Colors.red);
         
-        // Clear OTP fields on error (except for timeout errors)
-        if (errorType != 'timeout') {
-          _clearOTPFields();
+        // Clear OTP fields on error
+        for (var controller in _controllers) {
+          controller.clear();
+        }
+        // Focus on first field
+        if (mounted) {
+          FocusScope.of(context).requestFocus(_focusNodes[0]);
         }
       }
     } catch (e) {
       print('OTP verification error: $e');
       if (mounted) {
         _showSnackBar('Network error occurred. Please try again.', Colors.red);
-        // Don't clear fields on network error - user might want to retry
+        
+        // Clear OTP fields on error
+        for (var controller in _controllers) {
+          controller.clear();
+        }
+        // Focus on first field
+        FocusScope.of(context).requestFocus(_focusNodes[0]);
       }
     } finally {
       if (mounted) {
@@ -311,13 +289,6 @@ class _OTPFormState extends State<OTPForm> {
   void _resendOTP() async {
     if (_isResending) return; // Prevent multiple calls
     
-    // Check if we can send OTP (using the new helper method)
-    if (!OTPApiService.canSendOTP()) {
-      int waitTime = OTPApiService.getRemainingTime();
-      _showSnackBar('Please wait $waitTime seconds before requesting another OTP', Colors.orange);
-      return;
-    }
-    
     setState(() {
       _isResending = true;
     });
@@ -325,22 +296,24 @@ class _OTPFormState extends State<OTPForm> {
     try {
       print('Resending OTP to: ${widget.phoneNumber}');
       
-      // Use sendOTP instead of resendOTP for consistency
+      // Resend OTP API call
       final result = await OTPApiService.sendOTP(widget.phoneNumber);
       
       if (!mounted) return;
       
       if (result['success'] == true) {
         // Clear all fields
-        _clearOTPFields();
+        for (var controller in _controllers) {
+          controller.clear();
+        }
+        // Focus on first field
+        FocusScope.of(context).requestFocus(_focusNodes[0]);
         
         // Restart countdown
         _startResendCountdown();
         
         String message = result['message'] ?? 'OTP sent successfully';
         _showSnackBar(message, Colors.green);
-        
-        print('✅ OTP resent successfully');
       } else {
         String errorMessage = result['message'] ?? 'Failed to resend OTP';
         String errorType = result['error'] ?? '';
@@ -349,15 +322,6 @@ class _OTPFormState extends State<OTPForm> {
           int waitTime = result['waitTime'] ?? 30;
           errorMessage = 'Please wait $waitTime seconds before requesting another OTP';
           _showSnackBar(errorMessage, Colors.orange);
-          
-          // Update countdown to match server rate limit
-          setState(() {
-            _resendCountdown = waitTime;
-          });
-        } else if (errorType == 'user_not_found') {
-          _showSnackBar('User not found. Please go back and try again.', Colors.red);
-        } else if (errorType == 'timeout') {
-          _showSnackBar('Request timed out. Please check your internet connection and try again.', Colors.red);
         } else {
           _showSnackBar(errorMessage, Colors.red);
         }
@@ -468,13 +432,6 @@ class _OTPFormState extends State<OTPForm> {
                       borderRadius: BorderRadius.circular(8),
                       borderSide: const BorderSide(
                         color: kPrimaryColor,
-                        width: 2,
-                      ),
-                    ),
-                    errorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: Colors.red,
                         width: 2,
                       ),
                     ),
@@ -597,13 +554,13 @@ class _OTPFormState extends State<OTPForm> {
           
           // Back to Login/Signup
           TextButton(
-            onPressed: _isVerifying ? null : () {
+            onPressed: () {
               Navigator.pop(context);
             },
             child: Text(
               widget.isNewUser ? "← Back to Sign Up" : "← Back to Login",
-              style: TextStyle(
-                color: _isVerifying ? Colors.grey : kPrimaryColor,
+              style: const TextStyle(
+                color: kPrimaryColor,
               ),
             ),
           ),

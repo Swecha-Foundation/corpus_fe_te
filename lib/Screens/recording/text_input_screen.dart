@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../constants.dart';
 import '../../services/api_service.dart';
 import '../../services/uuid_service.dart';
+import '../../services/token_storage_service.dart';
 
 class TextInputScreen extends StatefulWidget {
   final String? selectedCategory;
@@ -36,15 +39,23 @@ class _TextInputScreenState extends State<TextInputScreen> {
   String? _userId;
   String? _categoryId;
   String _effectiveCategory = 'General';
-  
+
   // Available categories loaded from API
   List<String> _availableCategories = [];
+
+  // Location related variables
+  double? _latitude;
+  double? _longitude;
+  bool _isLocationEnabled = false;
+  bool _isLocationLoading = false;
+  String _locationStatus = 'Location not available';
 
   @override
   void initState() {
     super.initState();
     _textController.addListener(_updateCounts);
     _initializeData();
+    _checkLocationPermission();
   }
 
   Future<void> _initializeData() async {
@@ -55,32 +66,37 @@ class _TextInputScreenState extends State<TextInputScreen> {
     try {
       // Initialize UUID service
       await UuidService.initialize();
-      
+
       // Get current user ID - try multiple methods
       _userId = await _getCurrentUserId();
       print('DEBUG: Retrieved user ID: $_userId');
-      
+
       // Get available categories
       final categories = await UuidService.getCategories();
       _availableCategories = categories.keys.toList();
-      
+
       // If no categories available, add a default one
       if (_availableCategories.isEmpty) {
         _availableCategories = ['General'];
       }
-      
+
       // Determine effective category and ID
-      if (widget.selectedCategoryId != null && UuidService.isValidUuid(widget.selectedCategoryId!)) {
+      if (widget.selectedCategoryId != null &&
+          UuidService.isValidUuid(widget.selectedCategoryId!)) {
         // Use provided category ID
         _categoryId = widget.selectedCategoryId;
-        _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ?? widget.selectedCategory ?? 'General';
+        _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ??
+            widget.selectedCategory ??
+            'General';
       } else if (widget.selectedCategory != null) {
         // Use provided category name
         _effectiveCategory = widget.selectedCategory!;
         _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
       } else {
         // Use default category
-        _effectiveCategory = _availableCategories.isNotEmpty ? _availableCategories[0] : 'General';
+        _effectiveCategory = _availableCategories.isNotEmpty
+            ? _availableCategories[0]
+            : 'General';
         _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
       }
 
@@ -117,27 +133,188 @@ class _TextInputScreenState extends State<TextInputScreen> {
     }
   }
 
+  // Location permission and fetching methods
+  Future<void> _checkLocationPermission() async {
+    try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      
+      if (!serviceEnabled) {
+        setState(() {
+          _locationStatus = 'Location services disabled';
+        });
+        return;
+      }
+
+      // Check location permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          setState(() {
+            _locationStatus = 'Location permission denied';
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        setState(() {
+          _locationStatus = 'Location permission permanently denied';
+        });
+        return;
+      }
+
+      // If we have permission, get location
+      await _getCurrentLocation();
+    } catch (e) {
+      print('Error checking location permission: $e');
+      setState(() {
+        _locationStatus = 'Location error: ${e.toString()}';
+      });
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLocationLoading = true;
+      _locationStatus = 'Getting location...';
+    });
+
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      setState(() {
+        _latitude = position.latitude;
+        _longitude = position.longitude;
+        _isLocationEnabled = true;
+        _locationStatus = 'Location: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+        _isLocationLoading = false;
+      });
+
+      print('DEBUG: Location obtained - Lat: $_latitude, Lng: $_longitude');
+    } catch (e) {
+      print('Error getting location: $e');
+      setState(() {
+        _isLocationLoading = false;
+        _locationStatus = 'Failed to get location: ${e.toString()}';
+      });
+    }
+  }
+
+  Future<void> _requestLocationPermission() async {
+    // First check if location service is enabled
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    
+    if (!serviceEnabled) {
+      // Show dialog to enable location services
+      _showLocationServiceDialog();
+      return;
+    }
+
+    // Request location permission
+    LocationPermission permission = await Geolocator.requestPermission();
+    
+    if (permission == LocationPermission.whileInUse ||
+        permission == LocationPermission.always) {
+      await _getCurrentLocation();
+    } else if (permission == LocationPermission.deniedForever) {
+      _showPermissionSettingsDialog();
+    } else {
+      setState(() {
+        _locationStatus = 'Location permission denied';
+      });
+    }
+  }
+
+  void _showLocationServiceDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Services Disabled'),
+          content: const Text(
+            'Location services are disabled. Please enable them in your device settings to use this feature.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await Geolocator.openLocationSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showPermissionSettingsDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Permission Required'),
+          content: const Text(
+            'Location permission is permanently denied. Please enable it in app settings to use this feature.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _toggleLocation() {
+    if (_isLocationEnabled) {
+      // Disable location
+      setState(() {
+        _isLocationEnabled = false;
+        _latitude = null;
+        _longitude = null;
+        _locationStatus = 'Location disabled';
+      });
+    } else {
+      // Enable location
+      _requestLocationPermission();
+    }
+  }
+
   // Helper method to validate token
   Future<bool> _validateToken() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
-      final tokenExpiry = prefs.getString('tokenExpiry');
-      
+      final isValid = await TokenStorageService.isTokenValid();
+      if (!isValid) {
+        print('DEBUG: Token expired');
+        return false;
+      }
+      final token = await TokenStorageService.getAuthToken();
+
       if (token == null || token.isEmpty) {
         print('DEBUG: No token found');
         return false;
       }
-      
-      // Check if token is expired
-      if (tokenExpiry != null) {
-        final expiryDate = DateTime.tryParse(tokenExpiry);
-        if (expiryDate != null && expiryDate.isBefore(DateTime.now())) {
-          print('DEBUG: Token expired at $expiryDate');
-          return false;
-        }
-      }
-      
+
       // Test the token by making a simple API call
       try {
         final testResult = await ApiService.getCurrentUser();
@@ -157,6 +334,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
       return false;
     }
   }
+
   Future<String?> _getCurrentUserId() async {
     try {
       // First try UUID service
@@ -201,7 +379,8 @@ class _TextInputScreenState extends State<TextInputScreen> {
     final text = _textController.text;
     setState(() {
       _characterCount = text.length;
-      _wordCount = text.trim().isEmpty ? 0 : text.trim().split(RegExp(r'\s+')).length;
+      _wordCount =
+          text.trim().isEmpty ? 0 : text.trim().split(RegExp(r'\s+')).length;
     });
   }
 
@@ -256,16 +435,6 @@ class _TextInputScreenState extends State<TextInputScreen> {
       return;
     }
 
-    if (_categoryId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Invalid category selected'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
     setState(() {
       _isUploading = true;
     });
@@ -274,39 +443,42 @@ class _TextInputScreenState extends State<TextInputScreen> {
       // Step 1: Create text file first
       await _createTextFile();
 
-      // Step 2: Create record using the improved API method
-      final createResult = await ApiService.createRecordWithUuids(
+      // Step 2: Use the new createAndUploadRecord method with location data
+      if (_categoryId == null || _categoryId!.isEmpty) {
+        print("Category ID is null at submit text");
+        return;
+      }
+
+      // Prepare description with location info if available
+      String description = 'Text content in $_selectedLanguage language ($_wordCount words)';
+      if (_isLocationEnabled && _latitude != null && _longitude != null) {
+        description += ' - Location: ${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}';
+      }
+
+      final result = await ApiService.createAndUploadRecord(
         title: 'Text Input - ${DateTime.now().toString().split('.')[0]}',
-        description: 'Text content in $_selectedLanguage language ($_wordCount words)',
-        categoryName: _effectiveCategory,
+        description: description,
+        userId: currentUserId,
         mediaType: 'text',
-        fileName: _textFile?.path.split('/').last,
-        fileSize: _textFile?.lengthSync(),
+        categoryId: _categoryId!,
+        file: _textFile!,
+        latitude: _isLocationEnabled ? _latitude : null,
+        longitude: _isLocationEnabled ? _longitude : null,
       );
 
-      if (createResult['success']) {
-        final recordId = createResult['data']['id'];
+      // Clean up temporary file
+      await _cleanupTempFile();
 
-        // Step 3: Upload text file if it exists
-        if (_textFile != null && _textFile!.existsSync()) {
-          final uploadResult = await ApiService.uploadRecord(
-            recordId: recordId,
-            file: _textFile!,
-            description: 'Text content in $_selectedLanguage ($_wordCount words, $_characterCount characters)',
-          );
-
-          if (!uploadResult['success']) {
-            throw Exception(uploadResult['error']);
-          }
-        }
-
-        // Clean up temporary file
-        await _cleanupTempFile();
-
+      if (result['success']) {
         if (mounted) {
+          String successMessage = 'Text submitted successfully! ($_wordCount words)';
+          if (_isLocationEnabled) {
+            successMessage += ' with location data';
+          }
+          
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Text submitted successfully! ($_wordCount words)'),
+              content: Text(successMessage),
               backgroundColor: Colors.green,
               duration: const Duration(seconds: 3),
             ),
@@ -316,20 +488,20 @@ class _TextInputScreenState extends State<TextInputScreen> {
           Navigator.pop(context, true);
         }
       } else {
-        throw Exception(createResult['error'] ?? 'Unknown error occurred');
+        throw Exception(result['error'] ?? 'Unknown error occurred');
       }
     } catch (e) {
       print('Submit error: $e');
       await _cleanupTempFile(); // Clean up on error too
-      
+
       // Handle specific authentication errors
       String errorMessage = 'Failed to submit text: ${e.toString()}';
-      if (e.toString().contains('User not authenticated') || 
-          e.toString().contains('401') || 
+      if (e.toString().contains('User not authenticated') ||
+          e.toString().contains('401') ||
           e.toString().contains('422')) {
         errorMessage = 'Authentication failed. Please login again.';
       }
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -429,13 +601,90 @@ class _TextInputScreenState extends State<TextInputScreen> {
       },
     ).then((selectedCategory) async {
       if (selectedCategory != null && selectedCategory != _effectiveCategory) {
-        final newCategoryId = await UuidService.getCategoryUuid(selectedCategory);
+        final newCategoryId =
+            await UuidService.getCategoryUuid(selectedCategory);
         setState(() {
           _effectiveCategory = selectedCategory;
           _categoryId = newCategoryId;
         });
       }
     });
+  }
+
+  Widget _buildLocationCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade200,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _isLocationEnabled ? Icons.location_on : Icons.location_off,
+                color: _isLocationEnabled ? Colors.green : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Location',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: kPrimaryColor,
+                ),
+              ),
+              const Spacer(),
+              if (_isLocationLoading)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: kPrimaryColor,
+                  ),
+                ),
+              Switch(
+                value: _isLocationEnabled,
+                onChanged: (_) => _toggleLocation(),
+                activeColor: kPrimaryColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _locationStatus,
+            style: TextStyle(
+              fontSize: 12,
+              color: _isLocationEnabled ? Colors.green : Colors.grey,
+            ),
+          ),
+          if (_isLocationEnabled && _latitude != null && _longitude != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Coordinates will be included with your submission',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey.shade600,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -476,6 +725,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
+      resizeToAvoidBottomInset: true, // This helps with keyboard handling
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 2,
@@ -499,320 +749,381 @@ class _TextInputScreenState extends State<TextInputScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Header Info
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.shade200,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.category, color: kPrimaryColor, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Category: $_effectiveCategory',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: kPrimaryColor,
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: _changeCategory,
-                        child: const Text('Change'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      const Icon(Icons.language, color: kPrimaryColor, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Language: $_selectedLanguage',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: kPrimaryColor,
-                        ),
-                      ),
-                      const Spacer(),
-                      DropdownButton<String>(
-                        value: _selectedLanguage,
-                        underline: Container(),
-                        items: ['Telugu', 'English', 'Hindi']
-                            .map((lang) => DropdownMenuItem(
-                                  value: lang,
-                                  child: Text(lang),
-                                ))
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() {
-                              _selectedLanguage = value;
-                            });
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  // Debug info (remove in production)
-                  if (_userId != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.person, color: Colors.green, size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            'User: ${_userId!.substring(0, 8)}...',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: Colors.green,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-
-            // Text Input Area
-            Expanded(
-              child: Container(
-                margin: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.shade200,
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight,
                 ),
-                child: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: const BoxDecoration(
-                        color: kPrimaryColor,
-                        borderRadius: BorderRadius.only(
-                          topLeft: Radius.circular(12),
-                          topRight: Radius.circular(12),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.edit, color: Colors.white, size: 20),
-                          const SizedBox(width: 8),
-                          const Text(
-                            'Enter your text',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            '$_wordCount words',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: Padding(
+                child: IntrinsicHeight(
+                  child: Column(
+                    children: [
+                      // Header Info
+                      Container(
+                        width: double.infinity,
                         padding: const EdgeInsets.all(16),
-                        child: TextField(
-                          controller: _textController,
-                          focusNode: _focusNode,
-                          maxLines: null,
-                          expands: true,
-                          textAlignVertical: TextAlignVertical.top,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            height: 1.5,
+                        margin: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.shade200,
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.category,
+                                    color: kPrimaryColor, size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Category: $_effectiveCategory',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: kPrimaryColor,
+                                  ),
+                                ),
+                                const Spacer(),
+                                TextButton(
+                                  onPressed: _changeCategory,
+                                  child: const Text('Change'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                const Icon(Icons.language,
+                                    color: kPrimaryColor, size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Language: $_selectedLanguage',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: kPrimaryColor,
+                                  ),
+                                ),
+                                const Spacer(),
+                                DropdownButton<String>(
+                                  value: _selectedLanguage,
+                                  underline: Container(),
+                                  items: ['Telugu', 'English']
+                                      .map((lang) => DropdownMenuItem(
+                                            value: lang,
+                                            child: Text(lang),
+                                          ))
+                                      .toList(),
+                                  onChanged: (value) {
+                                    if (value != null) {
+                                      setState(() {
+                                        _selectedLanguage = value;
+                                      });
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                            // Debug info (remove in production)
+                            if (_userId != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.person,
+                                        color: Colors.green, size: 20),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'User: ${_userId!.substring(0, 8)}...',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.green,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+
+                      // Location Card
+                      _buildLocationCard(),
+
+                      // Text Input Area - Made flexible instead of Expanded
+                      Flexible(
+                        flex: 1,
+                        child: Container(
+                          margin: const EdgeInsets.all(16),
+                          constraints: const BoxConstraints(
+                            minHeight: 300, // Minimum height for text area
+                            maxHeight:
+                                500, // Maximum height to prevent overflow
                           ),
-                          decoration: const InputDecoration(
-                            hintText: 'Start typing your text here...',
-                            hintStyle: TextStyle(color: Colors.grey),
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.grey.shade200,
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: const BoxDecoration(
+                                  color: kPrimaryColor,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: Radius.circular(12),
+                                    topRight: Radius.circular(12),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.edit,
+                                        color: Colors.white, size: 20),
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      'Enter your text',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const Spacer(),
+                                    Text(
+                                      '$_wordCount words',
+                                      style: const TextStyle(
+                                        color: Colors.white70,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: TextField(
+                                    controller: _textController,
+                                    focusNode: _focusNode,
+                                    maxLines: null,
+                                    expands: true,
+                                    textAlignVertical: TextAlignVertical.top,
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      height: 1.5,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      hintText:
+                                          'Start typing your text here...',
+                                      hintStyle: TextStyle(color: Colors.grey),
+                                      border: InputBorder.none,
+                                      enabledBorder: InputBorder.none,
+                                      focusedBorder: InputBorder.none,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
 
-            // Stats and Submit Button
-            Container(
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.grey.shade200,
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  // Statistics
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceAround,
-                    children: [
-                      Column(
-                        children: [
-                          Text(
-                            '$_wordCount',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: kPrimaryColor,
-                            ),
-                          ),
-                          const Text(
-                            'Words',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
+                      // Stats and Submit Button
                       Container(
-                        width: 1,
-                        height: 30,
-                        color: Colors.grey.shade300,
-                      ),
-                      Column(
-                        children: [
-                          Text(
-                            '$_characterCount',
-                            style: const TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: kPrimaryColor,
+                        padding: const EdgeInsets.all(16),
+                        margin: const EdgeInsets.only(
+                            left: 16, right: 16, bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.grey.shade200,
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
                             ),
-                          ),
-                          const Text(
-                            'Characters',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
+                          ],
+                        ),
+                        child: Column(
+                          children: [
+                            // Statistics
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                Column(
+                                  children: [
+                                    Text(
+                                      '$_wordCount',
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: kPrimaryColor,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'Words',
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  width: 1,
+                                  height: 30,
+                                  color: Colors.grey.shade300,
+                                ),
+                                Column(
+                                  children: [
+                                    Text(
+                                      '$_characterCount',
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: kPrimaryColor,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'Characters',
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  width: 1,
+                                  height: 30,
+                                  color: Colors.grey.shade300,
+                                ),
+                                Column(
+                                  children: [
+                                    Text(
+                                      _selectedLanguage,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: kPrimaryColor,
+                                      ),
+                                    ),
+                                    const Text(
+                                      'Language',
+                                      style: TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
-                          ),
-                        ],
-                      ),
-                      Container(
-                        width: 1,
-                        height: 30,
-                        color: Colors.grey.shade300,
-                      ),
-                      Column(
-                        children: [
-                          Text(
-                            _selectedLanguage,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: kPrimaryColor,
+                            
+                            const SizedBox(height: 16),
+                            
+                            // Submit Button
+                            SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: ElevatedButton(
+                                onPressed: _isUploading || _textController.text.trim().isEmpty
+                                    ? null
+                                    : _handleSubmit,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: kPrimaryColor,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 2,
+                                ),
+                                child: _isUploading
+                                    ? const Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          SizedBox(width: 12),
+                                          Text(
+                                            'Submitting...',
+                                            style: TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Row(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(Icons.send, size: 20),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Submit Text${_isLocationEnabled ? ' with Location' : ''}',
+                                            style: const TextStyle(
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
                             ),
-                          ),
-                          const Text(
-                            'Language',
-                            style: TextStyle(
-                              color: Colors.grey,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                            
+                            // Helper text
+                            if (_textController.text.trim().isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Enter some text to enable submission',
+                                  style: TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            
+                            if (_userId == null || _userId!.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: Text(
+                                  'Please login to submit content',
+                                  style: TextStyle(
+                                    color: Colors.orange,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // Submit Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _isUploading || _textController.text.trim().isEmpty
-                          ? null
-                          : _handleSubmit,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kPrimaryColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        elevation: 2,
-                      ),
-                      child: _isUploading
-                          ? const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    color: Colors.white,
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                                SizedBox(width: 12),
-                                Text('Submitting...'),
-                              ],
-                            )
-                          : const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.send, size: 20),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Submit Text',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

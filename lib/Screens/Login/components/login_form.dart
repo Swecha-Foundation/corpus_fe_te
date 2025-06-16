@@ -182,6 +182,8 @@ class _LoginFormState extends State<LoginForm> {
       
       if (!mounted) return;
       
+      print('Login result: $loginResult');
+      
       if (loginResult['success'] == true) {
         // Password login successful
         print('Password login successful');
@@ -189,43 +191,101 @@ class _LoginFormState extends State<LoginForm> {
         // Extract token and user data from response
         final responseData = loginResult['data'];
         if (responseData == null) {
-          throw Exception('Invalid response data');
+          throw Exception('Invalid response data from server');
         }
         
-        String? authToken = responseData['access_token']?.toString();
-        String tokenType = responseData['token_type']?.toString() ?? 'bearer';
+        print('Response data: $responseData');
+        
+        // Extract authentication token
+        String? authToken;
+        String tokenType = 'bearer';
+        
+        // Check for different possible token field names
+        if (responseData['access_token'] != null) {
+          authToken = responseData['access_token'].toString();
+        } else if (responseData['token'] != null) {
+          authToken = responseData['token'].toString();
+        } else if (responseData['auth_token'] != null) {
+          authToken = responseData['auth_token'].toString();
+        }
+        
+        // Extract token type if available
+        if (responseData['token_type'] != null) {
+          tokenType = responseData['token_type'].toString();
+        }
         
         // Get user data
         String? userId;
         String userName = 'User'; // Default fallback
         
-        // If you have user data in the response, extract it
+        // Extract user information from different possible structures
+        Map<String, dynamic>? userData;
         if (responseData['user'] != null) {
-          final userData = responseData['user'];
-          userId = userData['id']?.toString();
-          userName = userData['name']?.toString() ?? 'User';
+          userData = responseData['user'] as Map<String, dynamic>?;
+        } else if (responseData['user_data'] != null) {
+          userData = responseData['user_data'] as Map<String, dynamic>?;
+        } else if (responseData['id'] != null) {
+          // User data might be at root level
+          userData = responseData;
         }
+        
+        if (userData != null) {
+          if (userData['id'] != null) {
+            userId = userData['id'].toString();
+          } else if (userData['user_id'] != null) {
+            userId = userData['user_id'].toString();
+          }
+          
+          if (userData['name'] != null) {
+            userName = userData['name'].toString();
+          } else if (userData['full_name'] != null) {
+            userName = userData['full_name'].toString();
+          } else if (userData['username'] != null) {
+            userName = userData['username'].toString();
+          }
+        }
+        
+        print('Extracted - Token: ${authToken != null ? 'Present' : 'Missing'}, UserId: $userId, UserName: $userName');
         
         // Store authentication data - only if authToken is not null
         if (authToken != null && authToken.isNotEmpty) {
-          await TokenStorageService.storeAuthData(
-            token: authToken,
-            tokenType: tokenType,
-            userId: userId,
-            phoneNumber: phoneNumber,
-            userName: userName,
-          );
-          
-          print('Auth data stored successfully');
+          try {
+            await TokenStorageService.storeAuthData(
+              token: authToken,
+              tokenType: tokenType,
+              userId: userId,
+              phoneNumber: phoneNumber,
+              userName: userName,
+            );
+            
+            print('Auth data stored successfully');
+          } catch (storageError) {
+            print('Failed to store auth data: $storageError');
+            throw Exception('Failed to store authentication data');
+          }
         } else {
-          throw Exception('No authentication token received');
+          print('No authentication token received in response');
+          // Check if this is still a successful login without token (some APIs work this way)
+          // In this case, we might just need to store basic user info
+          try {
+            await TokenStorageService.storeAuthData(
+              token: '', // Empty token
+              tokenType: tokenType,
+              userId: userId,
+              phoneNumber: phoneNumber,
+              userName: userName,
+            );
+            print('Basic user data stored without token');
+          } catch (storageError) {
+            print('Failed to store basic user data: $storageError');
+          }
         }
         
         // Update last login if we have the required data
-        // ignore: unnecessary_null_comparison
-        if (userId != null && authToken != null && mounted) {
+        if (userId != null && authToken != null && authToken.isNotEmpty && mounted) {
           try {
             await UserApiService.updateLastLogin(userId, authToken: authToken);
+            print('Last login updated successfully');
           } catch (e) {
             print('Failed to update last login: $e');
             // Continue with login process even if last login update fails
@@ -258,18 +318,24 @@ class _LoginFormState extends State<LoginForm> {
         String errorMessage = loginResult['message'] ?? 'Login failed';
         String errorType = loginResult['error']?.toString() ?? '';
         
+        print('Login failed - Error: $errorType, Message: $errorMessage');
+        
         // Provide more user-friendly error messages
         if (errorMessage.toLowerCase().contains('invalid') || 
             errorMessage.toLowerCase().contains('incorrect') ||
             errorMessage.toLowerCase().contains('unauthorized') ||
+            errorMessage.toLowerCase().contains('wrong') ||
             errorType.contains('invalid_credentials')) {
-          errorMessage = 'Invalid phone number or password';
+          errorMessage = 'Invalid phone number or password. Please check your credentials.';
         } else if (errorMessage.toLowerCase().contains('user not found') || 
                    errorMessage.toLowerCase().contains('does not exist') ||
+                   errorMessage.toLowerCase().contains('no account') ||
                    errorType == 'user_not_found') {
           errorMessage = 'No account found with this phone number. Please sign up first.';
         } else if (errorType == 'timeout') {
           errorMessage = 'Request timed out. Please check your internet connection and try again.';
+        } else if (errorType == 'network_error') {
+          errorMessage = 'Network connection error. Please check your internet connection.';
         }
         
         _showSnackBar(errorMessage, Colors.red);
@@ -278,9 +344,16 @@ class _LoginFormState extends State<LoginForm> {
       print('Password Login error: $e');
       if (mounted) {
         String errorMessage = 'Network error occurred. Please try again.';
+        
+        // Provide more specific error messages based on the exception
         if (e.toString().contains('token')) {
-          errorMessage = 'Login failed. Please try again.';
+          errorMessage = 'Login authentication failed. Please try again.';
+        } else if (e.toString().contains('connection')) {
+          errorMessage = 'Connection error. Please check your internet connection.';
+        } else if (e.toString().contains('timeout')) {
+          errorMessage = 'Request timed out. Please try again.';
         }
+        
         _showSnackBar(errorMessage, Colors.red);
       }
     } finally {

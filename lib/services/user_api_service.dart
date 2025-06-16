@@ -286,95 +286,141 @@ class UserApiService {
   
   // Login user with phone and password
   static Future<Map<String, dynamic>> loginUser({
-    required String phone,
-    required String password,
-  }) async {
-    // Input validation
-    if (phone.isEmpty || password.isEmpty) {
-      return {
-        'success': false,
-        'message': 'Phone number and password are required',
-        'error': 'missing_credentials'
-      };
-    }
-    
-    try {
-      String formattedPhone = _formatPhoneNumber(phone);
-      print('Logging in user with phone: $formattedPhone');
-      
-      final response = await http.post(
-        Uri.parse('$baseUrl/auth/login'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: jsonEncode({
-          'phone': formattedPhone, // Use formatted phone number
-          'password': password,
-        }),
-      ).timeout(timeoutDuration);
-      
-      print('Login Response Status: ${response.statusCode}');
-      print('Login Response Body: ${response.body}');
-      
-      if (response.statusCode == 200) {
-        final responseData = _parseResponse(response.body);
-        return {
-          'success': true,
-          'data': responseData,
-          'message': 'Login successful'
-        };
-      } else if (response.statusCode == 401) {
-        return {
-          'success': false,
-          'message': 'Invalid phone number or password',
-          'error': 'invalid_credentials'
-        };
-      } else if (response.statusCode == 404) {
-        return {
-          'success': false,
-          'message': 'No account found with this phone number',
-          'error': 'user_not_found'
-        };
-      } else {
-        final errorData = _parseErrorResponse(response.body);
-        String errorMessage = errorData['message'] ?? 'Login failed';
-        
-        // Provide more user-friendly error messages
-        if (_isInvalidCredentialsError(errorMessage)) {
-          errorMessage = 'Invalid phone number or password';
-        } else if (_isUserNotFoundError(errorMessage)) {
-          errorMessage = 'No account found with this phone number';
-        }
-        
-        return {
-          'success': false,
-          'message': errorMessage,
-          'error': 'login_failed'
-        };
-      }
-    } on TimeoutException {
-      return {
-        'success': false,
-        'message': 'Request timed out. Please check your internet connection.',
-        'error': 'timeout'
-      };
-    } on http.ClientException catch (e) {
-      print('Login Client Error: $e');
-      return {
-        'success': false,
-        'message': 'Network connection error. Please check your internet connection.',
-        'error': 'network_error'
-      };
-    } catch (e) {
-      print('Login Error: $e');
-      return {
-        'success': false,
-        'message': 'Network error: ${e.toString()}',
-        'error': e.toString()
-      };
-    }
+  required String phone,
+  required String password,
+}) async {
+  // Input validation
+  if (phone.isEmpty || password.isEmpty) {
+    return {
+      'success': false,
+      'message': 'Phone number and password are required',
+      'error': 'missing_credentials'
+    };
   }
+  
+  try {
+    String formattedPhone = _formatPhoneNumber(phone);
+    print('=== LOGIN DEBUG START ===');
+    print('Original phone: $phone');
+    print('Formatted phone: $formattedPhone');
+    print('Password length: ${password.length}');
+    print('Request URL: $baseUrl/auth/login');
+    
+    final requestBody = {
+      'phone': formattedPhone,
+      'password': password,
+    };
+    print('Request body: $requestBody');
+    
+    final response = await http.post(
+      Uri.parse('$baseUrl/auth/login'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: jsonEncode(requestBody),
+    ).timeout(timeoutDuration);
+    
+    print('Response Status Code: ${response.statusCode}');
+    print('Response Headers: ${response.headers}');
+    print('Response Body: ${response.body}');
+    print('=== LOGIN DEBUG END ===');
+    
+    if (response.statusCode == 200) {
+      final responseData = _parseResponse(response.body);
+      print('Parsed response data: $responseData');
+      
+      return {
+        'success': true,
+        'data': responseData,
+        'message': 'Login successful'
+      };
+    } else if (response.statusCode == 401) {
+      final errorData = _parseErrorResponse(response.body);
+      print('401 Error data: $errorData');
+      
+      return {
+        'success': false,
+        'message': 'Invalid phone number or password',
+        'error': 'invalid_credentials',
+        'details': errorData
+      };
+    } else if (response.statusCode == 404) {
+      final errorData = _parseErrorResponse(response.body);
+      print('404 Error data: $errorData');
+      
+      return {
+        'success': false,
+        'message': 'No account found with this phone number',
+        'error': 'user_not_found',
+        'details': errorData
+      };
+    } else if (response.statusCode == 422) {
+      final errorData = _parseErrorResponse(response.body);
+      print('422 Validation Error data: $errorData');
+      
+      return {
+        'success': false,
+        'message': 'Invalid input data. Please check your phone number and password.',
+        'error': 'validation_error',
+        'details': errorData
+      };
+    } else if (response.statusCode == 500) {
+      final errorData = _parseErrorResponse(response.body);
+      print('500 Server Error data: $errorData');
+      
+      return {
+        'success': false,
+        'message': 'Server error occurred. Please try again later.',
+        'error': 'server_error',
+        'details': errorData
+      };
+    } else {
+      final errorData = _parseErrorResponse(response.body);
+      print('Other Error (${response.statusCode}): $errorData');
+      
+      String errorMessage = errorData['message'] ?? 'Login failed';
+      
+      // Provide more user-friendly error messages
+      if (_isInvalidCredentialsError(errorMessage)) {
+        errorMessage = 'Invalid phone number or password';
+      } else if (_isUserNotFoundError(errorMessage)) {
+        errorMessage = 'No account found with this phone number';
+      }
+      
+      return {
+        'success': false,
+        'message': errorMessage,
+        'error': 'login_failed',
+        'statusCode': response.statusCode,
+        'details': errorData
+      };
+    }
+  } on TimeoutException {
+    print('Login request timed out');
+    return {
+      'success': false,
+      'message': 'Request timed out. Please check your internet connection.',
+      'error': 'timeout'
+    };
+  } on http.ClientException catch (e) {
+    print('Login Client Error: $e');
+    return {
+      'success': false,
+      'message': 'Network connection error. Please check your internet connection.',
+      'error': 'network_error',
+      'details': e.toString()
+    };
+  } catch (e) {
+    print('Login Unexpected Error: $e');
+    print('Error type: ${e.runtimeType}');
+    return {
+      'success': false,
+      'message': 'Network error: ${e.toString()}',
+      'error': e.toString()
+    };
+  }
+}
   
   // Verify OTP and get user data
   static Future<Map<String, dynamic>> verifyOTPAndGetUser({

@@ -1,5 +1,5 @@
 // services/uuid_service.dart
-// ignore_for_file: avoid_print
+// ignore_for_file: avoid_print, unnecessary_brace_in_string_interps
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -23,6 +23,8 @@ class UuidService {
     try {
       // Option 1: Try to extract from token if it contains user info
       final token = await TokenStorageService.getAuthToken(); // Fixed: changed from getToken() to getAuthToken()
+
+      print("uuid_service token: ${token}");
       if (token != null) {
         // If your JWT token contains user ID, decode it here
         // You can use jwt_decoder package for this:
@@ -35,6 +37,7 @@ class UuidService {
 
       // Option 2: Call API to get current user info
       final response = await _getCurrentUserFromApi();
+      print("_getCurrentUserFromApi ${response}");
       if (response['success']) {
         _currentUserId = response['data']['id'];
         return _currentUserId;
@@ -90,13 +93,22 @@ class UuidService {
 
     // Fallback: return default categories (these should match your backend)
     final fallbackCategories = {
-      'General': '660e8400-e29b-41d4-a716-446655440004',
-      'Fables': '660e8400-e29b-41d4-a716-446655440001',
-      'Stories': '660e8400-e29b-41d4-a716-446655440002',
-      'Poetry': '660e8400-e29b-41d4-a716-446655440003',
-      'Education': '660e8400-e29b-41d4-a716-446655440005',
-      'News': '660e8400-e29b-41d4-a716-446655440006',
-    };
+  'Fables': '379d6867-57c1-4f57-b6ee-fb734313e538',
+  'Events': '7a184c41-1a49-4beb-a01a-d8dc01693b15',
+  'Music': '94979e9f-4895-4cd7-8601-ad53d8099bf4',
+  'Places': '96e5104f-c786-4928-b932-f59f5b4ddbf0',
+  'Food': '833299f6-ff1c-4fde-804f-6d3b3877c76e',
+  'People': 'af8b7a27-00b4-4192-9fa6-90152a0640b2',
+  'Literature': '74b133e7-e496-4e9d-85b0-3bd5eb4c3871',
+  'Architecture': '94a13c20-8a03-45da-8829-10e2fe1e61a1',
+  'Skills': '6f6f5023-a99e-4a29-a44a-6d5acbf88085',
+  'Images': '4366cab1-031e-4b37-816b-311ee34461a9',
+  'Culture': 'ab9fa2ce-1f83-4e91-b89d-cca18e8b301e',
+  'Flora & Fauna': '5f40610f-ae47-4472-944c-cb899128ebbf',
+  'Education': '784ddb92-9540-4ce1-b4e4-6c1b7b18849d',
+  'Vegetation': '2f831ae2-f0cd-4142-8646-68dd195dfba2',
+  'Dance': '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+};
     
     _categoryCache = fallbackCategories;
     return fallbackCategories;
@@ -104,12 +116,15 @@ class UuidService {
 
   /// Get category UUID by name
   static Future<String> getCategoryUuid(String? categoryName) async {
+    print("category name: ${categoryName}");
     if (categoryName == null || categoryName.isEmpty) {
       categoryName = 'General';
     }
 
     final categories = await getCategories();
-    return categories[categoryName] ?? categories['General'] ?? '660e8400-e29b-41d4-a716-446655440004';
+    print("category: $categories");
+
+    return categories[categoryName.toLowerCase()] ?? categories['general'] ?? '660e8400-e29b-41d4-a716-446655440004';
   }
 
   /// Get category name by UUID
@@ -181,11 +196,11 @@ class UuidService {
   /// Private method to get current user from API
   static Future<Map<String, dynamic>> _getCurrentUserFromApi() async {
     try {
-      final url = Uri.parse('$baseUrl$apiVersion/users/me');
+      final url = Uri.parse('$baseUrl$apiVersion/auth/me');
       final headers = await _getHeaders();
       final response = await http.get(url, headers: headers);
 
-      print('Get current user response: ${response.statusCode}'); // Debug log
+      print('Get current user response: ${response.statusCode}, ${response.body}'); // Debug log
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);

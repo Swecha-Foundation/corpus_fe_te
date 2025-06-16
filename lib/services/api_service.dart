@@ -1,4 +1,4 @@
-// services/api_service.dart
+// services/api_service.dart - FIXED VERSION
 // ignore_for_file: avoid_print
 
 import 'dart:convert';
@@ -52,17 +52,17 @@ class ApiService {
     return headers;
   }
 
-  // Create a new record with proper schema
+  // FIXED: Create a new record with proper schema matching API docs
   static Future<Map<String, dynamic>> createRecord({
     required String title,
     required String description,
-    required String categoryId,
     required String userId,
     required String mediaType,
     double? latitude,
     double? longitude,
     String? fileName,
     int? fileSize,
+    String? categoryId, // Made optional since API doesn't expect it
   }) async {
     try {
       // Check if user is authenticated
@@ -78,6 +78,7 @@ class ApiService {
       final url = Uri.parse('$baseUrl$apiVersion/records/');
       final headers = await _getHeaders();
       
+      // FIXED: Match the exact API schema
       final body = <String, dynamic>{
         'title': title,
         'description': description,
@@ -119,7 +120,8 @@ class ApiService {
         return {
           'success': false,
           'error': 'Failed to create record: ${response.statusCode}',
-          'message': response.body
+          'message': response.body,
+          'statusCode': response.statusCode
         };
       }
     } catch (e) {
@@ -132,16 +134,199 @@ class ApiService {
     }
   }
 
-  // Upload file for a record
+  // FIXED: Upload file for a record with better error handling
   static Future<Map<String, dynamic>> uploadRecord({
-    required String recordId,
-    required File file,
-    String? description,
+  required String recordId,
+  required File file,
+  required String title,
+  required String categoryId,
+  required String userId,
+  required String mediaType,
+  String? description,
+}) async {
+  try {
+    // Check if user is authenticated
+    final isAuthenticated = await TokenStorageService.isAuthenticated();
+    if (!isAuthenticated) {
+      return {
+        'success': false,
+        'error': 'User not authenticated',
+        'message': 'Please login again'
+      };
+    }
+
+    // Verify file exists
+    if (!file.existsSync()) {
+      return {
+        'success': false,
+        'error': 'File does not exist',
+        'message': 'The file to upload was not found'
+      };
+    }
+
+    final url = Uri.parse('$baseUrl$apiVersion/records/upload');
+    
+    var request = http.MultipartRequest('POST', url);
+    
+    // Add headers (excluding Content-Type as it's set automatically for multipart)
+    final headers = await _getMultipartHeaders();
+    request.headers.addAll(headers);
+
+    // Add ALL required form fields based on the 422 error
+    request.fields['record_id'] = recordId.toString();
+    request.fields['title'] = title;
+    request.fields['category_id'] = categoryId;
+    request.fields['user_id'] = userId;
+    request.fields['media_type'] = mediaType;
+    
+    if (description != null && description.isNotEmpty) {
+      request.fields['description'] = description;
+    }
+
+    // Add file with proper MIME type detection
+    String? mimeType = lookupMimeType(file.path);
+    // ignore: prefer_conditional_assignment
+    if (mimeType == null) {
+      // Fallback MIME type based on media type
+      mimeType = 'text/plain'; // Default for text files
+    }
+    
+    var multipartFile = await http.MultipartFile.fromPath(
+      'file', // Field name expected by API
+      file.path,
+      contentType: MediaType.parse(mimeType),
+    );
+    request.files.add(multipartFile);
+
+    print('Uploading file for record: $recordId, File: ${file.path}, Size: ${file.lengthSync()} bytes');
+    print('Form fields: ${request.fields}'); // Debug log for form fields
+
+    var streamedResponse = await request.send();
+    var response = await http.Response.fromStream(streamedResponse);
+
+    print('Upload response: ${response.statusCode} - ${response.body}');
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return {
+        'success': true,
+        'data': jsonDecode(response.body),
+        'message': 'File uploaded successfully'
+      };
+    } else {
+      return {
+        'success': false,
+        'error': 'Failed to upload file: ${response.statusCode}',
+        'message': response.body,
+        'statusCode': response.statusCode
+      };
+    }
+  } catch (e) {
+    print('Upload error: $e');
+    return {
+      'success': false,
+      'error': 'Upload error: $e',
+      'message': 'Failed to upload file'
+    };
+  }
+}
+
+  // FIXED: Alternative method that creates record and uploads file in one step
+  static Future<Map<String, dynamic>> createAndUploadRecord({
+  required String title,
+  required String description,
+  required String userId,
+  required String mediaType,
+  required File file,
+  double? latitude,
+  double? longitude,
+  required String categoryId,
+}) async {
+  try {
+    // Step 1: Create the record first
+    final createResult = await createRecord(
+      title: title,
+      description: description,
+      userId: userId,
+      mediaType: mediaType,
+      latitude: latitude,
+      longitude: longitude,
+      fileName: file.path.split('/').last,
+      fileSize: file.lengthSync(),
+      categoryId: categoryId,
+    );
+
+    if (!createResult['success']) {
+      return createResult; // Return the error from record creation
+    }
+
+    // Step 2: Get the record ID and upload the file
+    final recordData = createResult['data'];
+    print("Record data: $recordData");
+    final recordId = recordData['uid'];
+
+    if (recordId == null) {
+      return {
+        'success': false,
+        'error': 'No record ID returned from create',
+        'message': 'Record created but no ID was returned'
+      };
+    }
+
+    // Step 3: Upload the file with ALL required fields
+    final uploadResult = await uploadRecord(
+      recordId: recordId.toString(),
+      file: file,
+      title: title,
+      categoryId: categoryId,
+      userId: userId,
+      mediaType: mediaType,
+      description: description,
+    );
+
+    if (!uploadResult['success']) {
+      return {
+        'success': false,
+        'error': 'Record created but file upload failed: ${uploadResult['error']}',
+        'message': uploadResult['message'],
+        'recordId': recordId,
+      };
+    }
+
+    return {
+      'success': true,
+      'data': {
+        'record': recordData,
+        'upload': uploadResult['data'],
+      },
+      'message': 'Record created and file uploaded successfully',
+      'recordId': recordId,
+    };
+  } catch (e) {
+    print('Create and upload error: $e');
+    return {
+      'success': false,
+      'error': 'Create and upload error: $e',
+      'message': 'Failed to create record and upload file'
+    };
+  }
+}
+
+  // Updated method to work without category_id
+  static Future<Map<String, dynamic>> createRecordWithUuids({
+    required String title,
+    required String description,
+    String? categoryName, // This will be ignored for now
+    required String mediaType,
+    double? latitude,
+    double? longitude,
+    String? fileName,
+    int? fileSize,
   }) async {
     try {
-      // Check if user is authenticated
-      final isAuthenticated = await TokenStorageService.isAuthenticated();
-      if (!isAuthenticated) {
+      // Get current user ID
+      final userId = await UuidService.getCurrentUserId();
+
+      if (userId == null) {
         return {
           'success': false,
           'error': 'User not authenticated',
@@ -149,55 +334,22 @@ class ApiService {
         };
       }
 
-      final url = Uri.parse('$baseUrl$apiVersion/records/upload');
-      
-      var request = http.MultipartRequest('POST', url);
-      
-      // Add headers (excluding Content-Type as it's set automatically for multipart)
-      final headers = await _getMultipartHeaders();
-      request.headers.addAll(headers);
-
-      // Add form fields
-      request.fields['record_id'] = recordId;
-      if (description != null) {
-        request.fields['description'] = description;
-      }
-
-      // Add file
-      String? mimeType = lookupMimeType(file.path);
-      var multipartFile = await http.MultipartFile.fromPath(
-        'file',
-        file.path,
-        contentType: mimeType != null ? MediaType.parse(mimeType) : null,
+      // Note: Ignoring categoryName since API doesn't support category_id
+      return await createRecord(
+        title: title,
+        description: description,
+        userId: userId,
+        mediaType: mediaType,
+        latitude: latitude,
+        longitude: longitude,
+        fileName: fileName,
+        fileSize: fileSize,
       );
-      request.files.add(multipartFile);
-
-      print('Uploading file for record: $recordId'); // Debug log
-
-      var streamedResponse = await request.send();
-      var response = await http.Response.fromStream(streamedResponse);
-
-      print('Upload response: ${response.statusCode} - ${response.body}'); // Debug log
-
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return {
-          'success': true,
-          'data': jsonDecode(response.body),
-          'message': 'File uploaded successfully'
-        };
-      } else {
-        return {
-          'success': false,
-          'error': 'Failed to upload file: ${response.statusCode}',
-          'message': response.body
-        };
-      }
     } catch (e) {
-      print('Upload error: $e'); // Debug log
       return {
         'success': false,
-        'error': 'Upload error: $e',
-        'message': 'Failed to upload file'
+        'error': 'Error creating record: $e',
+        'message': 'Failed to create record'
       };
     }
   }
@@ -304,7 +456,8 @@ class ApiService {
       final body = <String, dynamic>{};
       if (title != null) body['title'] = title;
       if (description != null) body['description'] = description;
-      if (categoryId != null) body['category_id'] = categoryId;
+      // Remove category_id since API doesn't support it
+      
       // Add location as nested object if coordinates are provided
       if (latitude != null && longitude != null) {
         body['location'] = {
@@ -419,50 +572,6 @@ class ApiService {
     }
   }
 
-  // Create record with UUID service integration
-  static Future<Map<String, dynamic>> createRecordWithUuids({
-    required String title,
-    required String description,
-    String? categoryName, // Use category name instead of ID
-    required String mediaType,
-    double? latitude,
-    double? longitude,
-    String? fileName,
-    int? fileSize,
-  }) async {
-    try {
-      // Get current user ID and category UUID
-      final userId = await UuidService.getCurrentUserId();
-      final categoryId = await UuidService.getCategoryUuid(categoryName);
-
-      if (userId == null) {
-        return {
-          'success': false,
-          'error': 'User not authenticated',
-          'message': 'Please login again'
-        };
-      }
-
-      return await createRecord(
-        title: title,
-        description: description,
-        categoryId: categoryId,
-        userId: userId,
-        mediaType: mediaType,
-        latitude: latitude,
-        longitude: longitude,
-        fileName: fileName,
-        fileSize: fileSize,
-      );
-    } catch (e) {
-      return {
-        'success': false,
-        'error': 'Error creating record: $e',
-        'message': 'Failed to create record'
-      };
-    }
-  }
-
   // Get categories from API (used by UuidService)
   static Future<Map<String, dynamic>> getCategories() async {
     try {
@@ -495,7 +604,7 @@ class ApiService {
   // Get current user info from API (used by UuidService)
   static Future<Map<String, dynamic>> getCurrentUser() async {
     try {
-      final url = Uri.parse('$baseUrl$apiVersion/users/me');
+      final url = Uri.parse('$baseUrl$apiVersion/auth/me');
       final headers = await _getHeaders();
       final response = await http.get(url, headers: headers);
 

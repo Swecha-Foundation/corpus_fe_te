@@ -23,10 +23,12 @@ double sin(double radians) {
 
 class AudioInputScreen extends StatefulWidget {
   final String? selectedCategory;
+  final String? selectedCategoryId; // Add this property
   
   const AudioInputScreen({
     Key? key,
     this.selectedCategory,
+    this.selectedCategoryId, // Add this parameter
   }) : super(key: key);
 
   @override
@@ -40,6 +42,8 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   bool _hasRecording = false;
   bool _isPlaying = false;
   bool _isUploading = false;
+  bool _locationPermissionGranted = false;
+  bool _locationEnabled = false;
   
   Duration _recordingDuration = Duration.zero;
   Duration _playbackPosition = Duration.zero;
@@ -63,13 +67,32 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   late AnimationController _waveController;
   late Animation<double> _pulseAnimation;
 
+  // Add fallback categories map
+  static const Map<String, String> fallbackCategories = {
+    'Fables': '379d6867-57c1-4f57-b6ee-fb734313e538',
+    'Events': '7a184c41-1a49-4beb-a01a-d8dc01693b15',
+    'Music': '94979e9f-4895-4cd7-8601-ad53d8099bf4',
+    'Places': '96e5104f-c786-4928-b932-f59f5b4ddbf0',
+    'Food': '833299f6-ff1c-4fde-804f-6d3b3877c76e',
+    'People': 'af8b7a27-00b4-4192-9fa6-90152a0640b2',
+    'Literature': '74b133e7-e496-4e9d-85b0-3bd5eb4c3871',
+    'Architecture': '94a13c20-8a03-45da-8829-10e2fe1e61a1',
+    'Skills': '6f6f5023-a99e-4a29-a44a-6d5acbf88085',
+    'Images': '4366cab1-031e-4b37-816b-311ee34461a9',
+    'Culture': 'ab9fa2ce-1f83-4e91-b89d-cca18e8b301e',
+    'Flora & Fauna': '5f40610f-ae47-4472-944c-cb899128ebbf',
+    'Education': '784ddb92-9540-4ce1-b4e4-6c1b7b18849d',
+    'Vegetation': '2f831ae2-f0cd-4142-8646-68dd195dfba2',
+    'Dance': '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  };
+
   @override
   void initState() {
     super.initState();
     _initializeAudio();
     _setupAnimations();
     _initializeUser();
-    _getCurrentLocation();
+    _initializeLocation();
   }
 
   void _initializeAudio() async {
@@ -125,6 +148,18 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     }
   }
 
+  void _showSuccess(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   Future<void> _initializeUser() async {
     try {
       // Get user ID from token storage or your auth system
@@ -142,30 +177,186 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     }
   }
 
-  Future<void> _getCurrentLocation() async {
+  Future<void> _initializeLocation() async {
     try {
+      // Check and request location permissions
+      await _checkLocationPermissions();
+      
+      // If permissions are granted, get current location
+      if (_locationPermissionGranted && _locationEnabled) {
+        await _getCurrentLocation();
+      }
+    } catch (e) {
+      print('Failed to initialize location: $e');
+    }
+  }
+
+  Future<void> _checkLocationPermissions() async {
+    try {
+      // Check if location services are enabled
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      setState(() {
+        _locationEnabled = serviceEnabled;
+      });
+
       if (!serviceEnabled) {
+        print('Location services are disabled');
         return;
       }
 
+      // Check current permission status
       LocationPermission permission = await Geolocator.checkPermission();
+      
       if (permission == LocationPermission.denied) {
+        // Request permission
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          return;
-        }
       }
+
+      // Update permission status
+      setState(() {
+        _locationPermissionGranted = permission == LocationPermission.whileInUse || 
+                                   permission == LocationPermission.always;
+      });
 
       if (permission == LocationPermission.deniedForever) {
+        print('Location permissions are permanently denied');
+        _showLocationPermissionDialog();
         return;
       }
+
+      if (!_locationPermissionGranted) {
+        print('Location permission denied');
+        return;
+      }
+
+      print('Location permission granted');
+    } catch (e) {
+      print('Error checking location permissions: $e');
+    }
+  }
+
+  void _showLocationPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Permission'),
+          content: const Text(
+            'Location permission is required to add location data to your recordings. '
+            'You can enable it in your device settings.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _requestLocationPermission() async {
+    try {
+      if (!_locationEnabled) {
+        // Show dialog to enable location services
+        showDialog(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('Enable Location Services'),
+              content: const Text(
+                'Please enable location services in your device settings to use location features.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Geolocator.openLocationSettings();
+                  },
+                  child: const Text('Open Settings'),
+                ),
+              ],
+            );
+          },
+        );
+        return;
+      }
+
+      // Request location permission
+      LocationPermission permission = await Geolocator.requestPermission();
+      
+      setState(() {
+        _locationPermissionGranted = permission == LocationPermission.whileInUse || 
+                                   permission == LocationPermission.always;
+      });
+
+      if (_locationPermissionGranted) {
+        _showSuccess('Location permission granted');
+        await _getCurrentLocation();
+      } else if (permission == LocationPermission.deniedForever) {
+        _showLocationPermissionDialog();
+      } else {
+        _showError('Location permission denied');
+      }
+    } catch (e) {
+      print('Error requesting location permission: $e');
+      _showError('Failed to request location permission');
+    }
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      if (!_locationPermissionGranted || !_locationEnabled) {
+        print('Location permission not granted or services disabled');
+        return;
+      }
+
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              SizedBox(width: 12),
+              Text('Getting location...'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.blue,
+        ),
+      );
 
       _currentPosition = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
       );
+
+      if (mounted) {
+        setState(() {});
+        print('Location obtained: ${_currentPosition?.latitude}, ${_currentPosition?.longitude}');
+        _showSuccess('Location updated successfully');
+      }
     } catch (e) {
       print('Failed to get location: $e');
+      _showError('Failed to get current location');
     }
   }
 
@@ -247,6 +438,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       if (!hasPermission) {
         _showError('Microphone permission denied');
         return;
+      }
+
+      // Try to get location before recording if permission is granted
+      if (_locationPermissionGranted && _locationEnabled) {
+        await _getCurrentLocation();
       }
 
       // Create audio file path
@@ -498,6 +694,10 @@ class _AudioInputScreenState extends State<AudioInputScreen>
               Text('Language: $_selectedLanguage'),
               if (widget.selectedCategory != null)
                 Text('Category: ${widget.selectedCategory}'),
+              if (_currentPosition != null)
+                Text('Location: ${_currentPosition!.latitude.toStringAsFixed(6)}, ${_currentPosition!.longitude.toStringAsFixed(6)}')
+              else
+                const Text('Location: Not available'),
               const SizedBox(height: 16),
               const Text('This will create a record and upload your audio. Continue?'),
             ],
@@ -524,6 +724,23 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     );
   }
 
+  // Helper method to get category ID
+  String _getCategoryId() {
+    // If selectedCategoryId is provided, use it
+    if (widget.selectedCategoryId != null) {
+      return widget.selectedCategoryId!;
+    }
+    
+    // If selectedCategory is provided, try to find matching ID
+    if (widget.selectedCategory != null) {
+      return fallbackCategories[widget.selectedCategory] ?? 
+             fallbackCategories['Music']!; // Default to Music
+    }
+    
+    // Default fallback
+    return fallbackCategories['Music']!;
+  }
+
   Future<void> _handleSubmit() async {
     setState(() {
       _isUploading = true;
@@ -534,15 +751,21 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         throw Exception('Audio file not found');
       }
 
+      // FIXED: Get current user ID from TokenStorageService instead of UuidService
+      if (_userId == null) {
+        throw Exception('User not authenticated');
+      }
+
       // Get file info
       final fileSize = await _audioFile!.length();
       final fileName = _audioFile!.path.split('/').last;
+      final categoryId = _getCategoryId();
 
       // Step 1: Create record with all required information
       final createResult = await ApiService.createRecord(
         title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}',
         description: 'Audio recording in $_selectedLanguage language (${_formatDuration(_recordingDuration)})',
-        categoryId: widget.selectedCategory ?? 'general',
+        categoryId: categoryId,
         userId: _userId!,
         mediaType: 'audio',
         latitude: _currentPosition?.latitude,
@@ -556,16 +779,20 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       }
 
       final recordData = createResult['data'];
-      _currentRecordId = recordData['id']?.toString();
+      _currentRecordId = recordData['uid']?.toString(); // NOTE: API returns 'uid', not 'id'
 
       if (_currentRecordId == null) {
         throw Exception('No record ID returned from server');
       }
 
-      // Step 2: Upload audio file
+      // Step 2: Upload audio file with ALL required parameters
       final uploadResult = await ApiService.uploadRecord(
         recordId: _currentRecordId!,
         file: _audioFile!,
+        title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}', // REQUIRED
+        categoryId: categoryId, // REQUIRED
+        userId: _userId!, // REQUIRED
+        mediaType: 'audio', // REQUIRED
         description: 'Audio recording in $_selectedLanguage (${_formatDuration(_recordingDuration)})',
       );
 
@@ -582,7 +809,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
           duration: const Duration(seconds: 3),
         ),
       );
-      
+
       // Navigate back to previous screen
       Navigator.pop(context, {
         'success': true,
@@ -610,6 +837,62 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     String twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
     String twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
     return '$twoDigitMinutes:$twoDigitSeconds';
+  }
+
+  Widget _buildLocationStatus() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: _locationPermissionGranted && _locationEnabled
+            ? Colors.green.withOpacity(0.1)
+            : Colors.orange.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _locationPermissionGranted && _locationEnabled
+              ? Colors.green
+              : Colors.orange,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _locationPermissionGranted && _locationEnabled
+                ? Icons.location_on
+                : Icons.location_off,
+            size: 14,
+            color: _locationPermissionGranted && _locationEnabled
+                ? Colors.green
+                : Colors.orange,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            _locationPermissionGranted && _locationEnabled
+                ? 'Location enabled'
+                : 'Location disabled',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: _locationPermissionGranted && _locationEnabled
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+          ),
+          if (!_locationPermissionGranted || !_locationEnabled) ...[
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: _requestLocationPermission,
+              child: const Icon(
+                Icons.settings,
+                size: 14,
+                color: Colors.orange,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   @override
@@ -684,381 +967,456 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                                 widget.selectedCategory ?? 'General',
                                 style: const TextStyle(
                                   color: kPrimaryColor,
-                                  fontSize: 12,
                                   fontWeight: FontWeight.w600,
+                                  fontSize: 12,
                                 ),
                               ),
                             ),
                             const Spacer(),
-                            DropdownButton<String>(
-                              value: _selectedLanguage,
-                              underline: Container(),
-                              items: ['Telugu', 'English', 'Hindi', 'Tamil'].map((String value) {
-                                return DropdownMenuItem<String>(
-                                  value: value,
-                                  child: Text(
-                                    value,
-                                    style: const TextStyle(fontSize: 14),
-                                  ),
-                                );
-                              }).toList(),
-                              onChanged: (String? newValue) {
-                                if (newValue != null && !_isRecording) {
-                                  setState(() {
-                                    _selectedLanguage = newValue;
-                                  });
-                                }
-                              },
-                            ),
+                            _buildLocationStatus(),
                           ],
                         ),
                         const SizedBox(height: 12),
-                        const Text(
-                          'Record your voice',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Tap the record button to start capturing your audio',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        if (_currentRecordId != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.check_circle, color: Colors.green, size: 16),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    'Record ID: $_currentRecordId',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.green,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
+                        Row(
+                          children: [
+                            const Icon(Icons.language, size: 16, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Language: $_selectedLanguage',
+                              style: const TextStyle(
+                                color: Colors.grey,
+                                fontSize: 14,
+                              ),
                             ),
-                          ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: () => _showLanguageSelector(),
+                              child: const Icon(
+                                Icons.edit,
+                                size: 16,
+                                color: kPrimaryColor,
+                              ),
+                            ),
+                          ],
+                        ),
                       ],
                     ),
                   ),
 
-                  // Recording Area
+                  // Recording Visualization
                   Expanded(
                     child: Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            offset: const Offset(0, 2),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
                       child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Status and Duration
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                _formatDuration(_recordingDuration),
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: kPrimaryColor,
-                                ),
-                              ),
-                              Row(
-                                children: [
-                                  if (_isUploading)
-                                    const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
-                                    )
-                                  else
-                                    Icon(
-                                      _isRecording 
-                                          ? (_isPaused ? Icons.pause : Icons.fiber_manual_record)
-                                          : (_hasRecording ? Icons.check_circle : Icons.mic),
-                                      color: _isRecording 
-                                          ? (_isPaused ? Colors.orange : Colors.red)
-                                          : (_hasRecording ? Colors.green : Colors.grey),
-                                      size: 16,
-                                    ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    _isRecording 
-                                        ? (_isPaused ? 'Paused' : 'Recording')
-                                        : (_hasRecording ? 'Recorded' : 'Ready'),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: _isRecording 
-                                          ? (_isPaused ? Colors.orange : Colors.red)
-                                          : (_hasRecording ? Colors.green : Colors.grey),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                          // Audio Visualizer
+                          Container(
+                            height: 200,
+                            width: double.infinity,
+                            margin: const EdgeInsets.symmetric(vertical: 32),
+                            child: _buildAudioVisualizer(),
                           ),
-                          
-                          const SizedBox(height: 40),
-                          
-                          // Audio Visualization
-                          SizedBox(
-                            height: 100,
-                            child: AnimatedBuilder(
-                              animation: _waveController,
-                              builder: (context, child) {
-                                return CustomPaint(
-                                  painter: AudioWavePainter(
-                                    animationValue: _waveController.value,
-                                    audioLevel: _audioLevel,
-                                    isRecording: _isRecording && !_isPaused,
-                                  ),
-                                  child: Container(),
-                                );
-                              },
+
+                          // Duration Display
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
                             ),
-                          ),
-                          
-                          const SizedBox(height: 40),
-                          
-                          // Playback Controls
-                          if (_hasRecording) ...[
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton(
-                                  onPressed: _isPlaying ? _stopPlayback : _playRecording,
-                                  icon: Icon(
-                                    _isPlaying ? Icons.stop : Icons.play_arrow,
-                                    size: 24,
-                                  ),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: Colors.grey.shade100,
-                                    foregroundColor: kPrimaryColor,
-                                  ),
-                                ),
-                                const SizedBox(width: 20),
-                                Expanded(
-                                  child: Column(
-                                    children: [
-                                      LinearProgressIndicator(
-                                        value: _recordingDuration.inSeconds > 0
-                                            ? _playbackPosition.inSeconds / _recordingDuration.inSeconds
-                                            : 0.0,
-                                        backgroundColor: Colors.grey.shade200,
-                                        valueColor: const AlwaysStoppedAnimation<Color>(kPrimaryColor),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(
-                                            _formatDuration(_playbackPosition),
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                          Text(
-                                            _formatDuration(_recordingDuration),
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              color: Colors.grey,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(25),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  offset: const Offset(0, 2),
+                                  blurRadius: 8,
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 30),
-                          ],
-                          
-                          const Spacer(),
-                          
-                          // Main Record Button
-                          AnimatedBuilder(
-                            animation: _pulseAnimation,
-                            builder: (context, child) {
-                              return Transform.scale(
-                                scale: _isRecording && !_isPaused ? _pulseAnimation.value : 1.0,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    if (!_isRecording) {
-                                      _startRecording();
-                                    } else {
-                                      _stopRecording();
-                                    }
-                                  },
-                                  child: Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: _isRecording ? Colors.red : kPrimaryColor,
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: (_isRecording ? Colors.red : kPrimaryColor).withOpacity(0.3),
-                                          spreadRadius: _isRecording ? 5 : 0,
-                                          blurRadius: 15,
-                                        ),
-                                      ],
-                                    ),
-                                    child: Icon(
-                                      _isRecording ? Icons.stop : Icons.mic,
-                                      color: Colors.white,
-                                      size: 32,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
+                            child: Text(
+                              _formatDuration(
+                                _isPlaying ? _playbackPosition : _recordingDuration,
+                              ),
+                              style: const TextStyle(
+                                fontSize: 32,
+                                fontWeight: FontWeight.bold,
+                                color: kPrimaryColor,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
                           ),
-                          
-                          const SizedBox(height: 20),
-                          
+
+                          const SizedBox(height: 40),
+
                           // Control Buttons
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              if (_isRecording) ...[
-                                IconButton(
-                                  onPressed: _isPaused ? _resumeRecording : _pauseRecording,
-                                  icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: Colors.orange.shade100,
-                                    foregroundColor: Colors.orange,
-                                  ),
+                              // Play/Pause Button (only show if has recording)
+                              if (_hasRecording)
+                                _buildControlButton(
+                                  onPressed: _isPlaying ? _stopPlayback : _playRecording,
+                                  icon: _isPlaying ? Icons.stop : Icons.play_arrow,
+                                  color: Colors.purple,
+                                  size: 60,
                                 ),
-                              ],
+
+                              // Main Record Button
+                              _buildMainRecordButton(),
+
+                              // Delete Button (only show if has recording)
+                              if (_hasRecording)
+                                _buildControlButton(
+                                  onPressed: _deleteRecording,
+                                  icon: Icons.delete,
+                                  color: Colors.red,
+                                  size: 60,
+                                ),
                             ],
                           ),
+
+                          const SizedBox(height: 32),
+
+                          // Additional Controls Row
+                          if (_isRecording) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _buildControlButton(
+                                  onPressed: _isPaused ? _resumeRecording : _pauseRecording,
+                                  icon: _isPaused ? Icons.play_arrow : Icons.pause,
+                                  color: Colors.orange,
+                                  size: 50,
+                                ),
+                                const SizedBox(width: 20),
+                                _buildControlButton(
+                                  onPressed: _stopRecording,
+                                  icon: Icons.stop,
+                                  color: Colors.red,
+                                  size: 50,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+                          ],
                         ],
                       ),
                     ),
                   ),
-                  
+
                   // Submit Button
                   if (_hasRecording && !_isRecording)
                     Container(
-                      margin: const EdgeInsets.all(16),
                       width: double.infinity,
+                      margin: const EdgeInsets.all(16),
                       child: ElevatedButton(
                         onPressed: _isUploading ? null : _submitRecording,
-                       style: ElevatedButton.styleFrom(
-                         backgroundColor: kPrimaryColor,
-                         foregroundColor: Colors.white,
-                         padding: const EdgeInsets.symmetric(vertical: 16),
-                         shape: RoundedRectangleBorder(
-                           borderRadius: BorderRadius.circular(8),
-                         ),
-                         elevation: 2,
-                       ),
-                       child: _isUploading
-                           ? const Row(
-                               mainAxisAlignment: MainAxisAlignment.center,
-                               children: [
-                                 SizedBox(
-                                   width: 20,
-                                   height: 20,
-                                   child: CircularProgressIndicator(
-                                     strokeWidth: 2,
-                                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                   ),
-                                 ),
-                                 SizedBox(width: 12),
-                                 Text('Uploading...'),
-                               ],
-                             )
-                           : const Text(
-                               'Submit Recording',
-                               style: TextStyle(
-                                 fontSize: 16,
-                                 fontWeight: FontWeight.w600,
-                               ),
-                             ),
-                     ),
-                   ),
-                 
-                 const SizedBox(height: 16),
-               ],
-             ),
-           ),
-         ),
-       ),
-     ),
-   );
- }
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: kPrimaryColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                        ),
+                        child: _isUploading
+                            ? const Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  ),
+                                  SizedBox(width: 12),
+                                  Text(
+                                    'Uploading...',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : const Text(
+                                'Submit Recording',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainRecordButton() {
+    return AnimatedBuilder(
+      animation: _pulseAnimation,
+      builder: (context, child) {
+        return Transform.scale(
+          scale: _isRecording && !_isPaused ? _pulseAnimation.value : 1.0,
+          child: GestureDetector(
+            onTap: () async {
+              if (_isRecording) {
+                // If recording, stop it
+                await _stopRecording();
+              } else {
+                // If not recording, start recording
+                await _startRecording();
+              }
+            },
+            child: Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _isRecording
+                    ? (_isPaused ? Colors.orange : Colors.red)
+                    : kPrimaryColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: (_isRecording
+                            ? (_isPaused ? Colors.orange : Colors.red)
+                            : kPrimaryColor)
+                        .withOpacity(0.3),
+                    offset: const Offset(0, 4),
+                    blurRadius: 12,
+                    spreadRadius: _isRecording && !_isPaused ? 4 : 0,
+                  ),
+                ],
+              ),
+              child: Icon(
+                _isRecording
+                    ? (_isPaused ? Icons.play_arrow : Icons.stop)
+                    : Icons.mic,
+                color: Colors.white,
+                size: 36,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildControlButton({
+    required VoidCallback onPressed,
+    required IconData icon,
+    required Color color,
+    required double size,
+  }) {
+    return GestureDetector(
+      onTap: onPressed,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: color,
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              offset: const Offset(0, 2),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: size * 0.4,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAudioVisualizer() {
+    if (_isRecording && !_isPaused) {
+      return AnimatedBuilder(
+        animation: _waveController,
+        builder: (context, child) {
+          return CustomPaint(
+            painter: AudioWavePainter(
+              animationValue: _waveController.value,
+              audioLevel: _audioLevel,
+            ),
+            size: const Size(double.infinity, 200),
+          );
+        },
+      );
+    } else if (_hasRecording) {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              offset: const Offset(0, 2),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _isPlaying ? Icons.volume_up : Icons.audiotrack,
+              size: 64,
+              color: _isPlaying ? Colors.purple : kPrimaryColor,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _isPlaying ? 'Playing...' : 'Recording Ready',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: _isPlaying ? Colors.purple : kPrimaryColor,
+              ),
+            ),
+            if (_isPlaying && _recordingDuration.inSeconds > 0) ...[
+              const SizedBox(height: 12),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                child: LinearProgressIndicator(
+                  value: _playbackPosition.inSeconds / _recordingDuration.inSeconds,
+                  backgroundColor: Colors.grey.withOpacity(0.2),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.purple),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    } else {
+      return Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              offset: const Offset(0, 2),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.mic_none,
+              size: 64,
+              color: Colors.grey,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Tap to start recording',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  void _showLanguageSelector() {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Select Language',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ...['Telugu', 'English', 'Hindi', 'Tamil', 'Kannada', 'Malayalam']
+                  .map((language) => ListTile(
+                        title: Text(language),
+                        trailing: _selectedLanguage == language
+                            ? const Icon(Icons.check, color: kPrimaryColor)
+                            : null,
+                        onTap: () {
+                          setState(() {
+                            _selectedLanguage = language;
+                          });
+                          Navigator.pop(context);
+                        },
+                      )),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
+// Custom painter for audio wave visualization
 class AudioWavePainter extends CustomPainter {
- final double animationValue;
- final double audioLevel;
- final bool isRecording;
+  final double animationValue;
+  final double audioLevel;
 
- AudioWavePainter({
-   required this.animationValue,
-   required this.audioLevel,
-   required this.isRecording,
- });
+  AudioWavePainter({
+    required this.animationValue,
+    required this.audioLevel,
+  });
 
- @override
- void paint(Canvas canvas, Size size) {
-   final paint = Paint()
-     ..color = isRecording ? kPrimaryColor.withOpacity(0.6) : Colors.grey.withOpacity(0.3)
-     ..strokeWidth = 2
-     ..style = PaintingStyle.stroke;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = kPrimaryColor
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
 
-   final centerY = size.height / 2;
-   final width = size.width;
-   const  waveCount = 50;
-   
-   for (int i = 0; i < waveCount; i++) {
-     final x = (width / waveCount) * i;
-     final normalizedX = x / width;
-     
-     // Create wave effect
-     final waveOffset = sin((normalizedX * 4 * math.pi) + (animationValue * 2 * math.pi));
-     final amplitude = isRecording ? (audioLevel * 30 + 10) : 5;
-     final y1 = centerY - (waveOffset * amplitude);
-     final y2 = centerY + (waveOffset * amplitude);
-     
-     // Draw wave line
-     canvas.drawLine(
-       Offset(x, y1),
-       Offset(x, y2),
-       paint,
-     );
-   }
- }
+    final centerY = size.height / 2;
+    final waveWidth = size.width;
+    const waveCount = 5;
 
- @override
- bool shouldRepaint(AudioWavePainter oldDelegate) {
-   return oldDelegate.animationValue != animationValue ||
-          oldDelegate.audioLevel != audioLevel ||
-          oldDelegate.isRecording != isRecording;
- }
+    for (int i = 0; i < waveCount; i++) {
+      final path = Path();
+      final amplitude = (audioLevel * 50) * (1 - i * 0.2);
+      final frequency = 0.02 * (i + 1);
+      final phase = animationValue * 2 * math.pi * (i + 1);
+
+      path.moveTo(0, centerY);
+
+      for (double x = 0; x <= waveWidth; x += 2) {
+        final y = centerY + amplitude * sin((x * frequency) + phase);
+        path.lineTo(x, y);
+      }
+
+      paint.color = kPrimaryColor.withOpacity(1 - i * 0.2);
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(AudioWavePainter oldDelegate) {
+    return oldDelegate.animationValue != animationValue ||
+           oldDelegate.audioLevel != audioLevel;
+  }
 }

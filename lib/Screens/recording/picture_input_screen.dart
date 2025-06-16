@@ -2,21 +2,26 @@
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import '../../constants.dart';
 import '../../services/api_service.dart';
-import '../../services/token_storage_service.dart'; // Add this import
+import '../../services/uuid_service.dart';
+import '../../services/token_storage_service.dart';
 
 class PictureInputScreen extends StatefulWidget {
   final String? selectedCategory;
   final String? categoryId;
+  final String? selectedCategoryId;
   final String? userId;
   
   const PictureInputScreen({
     Key? key,
     this.selectedCategory,
     this.categoryId,
+    this.selectedCategoryId,
     this.userId,
   }) : super(key: key);
 
@@ -33,12 +38,18 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
   bool _isProcessing = false;
   bool _isUploading = false;
   bool _isLoadingLocation = false;
+  bool _isInitializing = false;
   String _selectedLanguage = 'Telugu';
   int _captionWordCount = 0;
   String? _createdRecordId;
-  String? _currentUserId;
   
-  // Location variables
+  // ADD THESE MISSING VARIABLES TO YOUR CLASS
+  String? _userId;                    // Current user ID
+  String? _effectiveCategory;         // The category name being used
+  String? _categoryId;               // The UUID of the category
+  List<String> _availableCategories = []; // List of available category names
+  
+  // Location variables (these should already exist)
   double? _currentLatitude;
   double? _currentLongitude;
   String _locationStatus = 'Location not available';
@@ -47,8 +58,7 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
   void initState() {
     super.initState();
     _captionController.addListener(_updateCaptionWordCount);
-    _getCurrentLocation();
-    _loadUserData();
+    _initializeData();
   }
 
   @override
@@ -59,15 +69,140 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
     super.dispose();
   }
 
-  // Load user data from storage
-  Future<void> _loadUserData() async {
+  // Initialize all data including authentication and location
+  Future<void> _initializeData() async {
+  setState(() {
+    _isInitializing = true;
+  });
+
+  try {
+    // Initialize UUID service
+    await UuidService.initialize();
+    
+    // Get current user ID - try multiple methods
+    _userId = await _getCurrentUserId();
+    print('DEBUG: Retrieved user ID: $_userId');
+    
+    // Get available categories
+    final categories = await UuidService.getCategories();
+    _availableCategories = categories.keys.toList();
+    
+    // If no categories available, add a default one
+    if (_availableCategories.isEmpty) {
+      _availableCategories = ['General'];
+    }
+    
+    // Determine effective category and ID
+    if (widget.selectedCategoryId != null && UuidService.isValidUuid(widget.selectedCategoryId!)) {
+      // Use provided category ID
+      _categoryId = widget.selectedCategoryId;
+      _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ?? 
+                          widget.selectedCategory ?? 'General';
+    } else if (widget.selectedCategory != null) {
+      // Use provided category name
+      _effectiveCategory = widget.selectedCategory!;
+      _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
+    } else {
+      // Use default category
+      _effectiveCategory = _availableCategories.isNotEmpty ? 
+                          _availableCategories[0] : 'General';
+      _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
+    }
+    
+    // Check if user is authenticated
+    if (_userId == null || _userId!.isEmpty) {
+      print('DEBUG: User ID is null or empty');
+      if (mounted) {
+        _showSnackBar('Please login to submit content', Colors.orange);
+      }
+    } else {
+      print('DEBUG: User is authenticated with ID: $_userId');
+    }
+
+    // Get location in parallel
+    _getCurrentLocation();
+
+  } catch (e) {
+    print('Error initializing data: $e');
+    if (mounted) {
+      _showSnackBar('Error loading data: ${e.toString()}', Colors.red);
+    }
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isInitializing = false;
+      });
+    }
+  }
+}
+
+
+  // Enhanced user ID retrieval with multiple fallback methods
+  Future<String?> _getCurrentUserId() async {
     try {
-      _currentUserId = await TokenStorageService.getUserId();
-      if (_currentUserId == null) {
-        _showSnackBar('User not authenticated. Please login again.', Colors.red);
+      // Method 1: Try TokenStorageService first
+      String? userId = await TokenStorageService.getUserId();
+      if (userId != null && userId.isNotEmpty) {
+        return userId;
+      }
+
+      // Method 2: Try widget parameter
+      if (widget.userId != null && widget.userId!.isNotEmpty) {
+        return widget.userId;
+      }
+
+      // Method 3: Try to get from current user API call
+      try {
+        final userResult = await ApiService.getCurrentUser();
+        if (userResult['success'] == true && userResult['data'] != null) {
+          final userData = userResult['data'];
+          if (userData['id'] != null) {
+            return userData['id'].toString();
+          }
+        }
+      } catch (e) {
+        print('DEBUG: Failed to get user from API: $e');
+      }
+
+      return null;
+    } catch (e) {
+      print('DEBUG: Error in _getCurrentUserId: $e');
+      return null;
+    }
+  }
+
+  // Validate token before critical operations
+  Future<bool> _validateToken() async {
+    try {
+      final isValid = await TokenStorageService.isTokenValid();
+      if (!isValid) {
+        print('DEBUG: Token expired');
+        return false;
+      }
+
+      final token = await TokenStorageService.getAuthToken();
+      if (token == null || token.isEmpty) {
+        print('DEBUG: No token found');
+        return false;
+      }
+
+      // Test the token by making a simple API call
+      try {
+        final testResult = await ApiService.getCurrentUser();
+        if (testResult['success']) {
+          print('DEBUG: Token validation passed');
+          return true;
+        } else {
+          print('DEBUG: Token validation failed: ${testResult['error']}');
+          return false;
+        }
+      } catch (e) {
+        print('DEBUG: Token test failed: $e');
+        return false;
       }
     } catch (e) {
-      print('Error loading user data: $e');
+      print('DEBUG: Token validation error: $e');
+      return false;
     }
   }
 
@@ -191,164 +326,99 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
   }
 
   Future<void> _processImages() async {
-    if (_selectedImages.isEmpty) {
-      _showSnackBar('Please select at least one image', Colors.orange);
-      return;
-    }
-
-    if (_titleController.text.trim().isEmpty) {
-      _showSnackBar('Please enter a title', Colors.orange);
-      return;
-    }
-
-    // Check authentication
-    final isAuthenticated = await TokenStorageService.isAuthenticated();
-    if (!isAuthenticated) {
-      _showSnackBar('Please login again to continue', Colors.red);
-      return;
-    }
-
-    setState(() {
-      _isProcessing = true;
-    });
-
-    try {
-      // Get file info from first image for the record
-      final firstImage = File(_selectedImages.first.path);
-      final fileSize = await firstImage.length();
-      final fileName = _selectedImages.first.name;
-
-      // Use the stored user ID or fallback to widget parameter
-      final userId = _currentUserId ?? widget.userId ?? 'default_user';
-
-      // Create a record with proper schema
-      final recordResponse = await ApiService.createRecord(
-        title: _titleController.text.trim(),
-        description: _captionController.text.trim(),
-        categoryId: widget.categoryId ?? '1',
-        userId: userId,
-        mediaType: 'image',
-        latitude: _currentLatitude,
-        longitude: _currentLongitude,
-        fileName: fileName,
-        fileSize: fileSize,
-      );
-
-      if (recordResponse['success'] == true) {
-        // Extract record ID from response
-        final responseData = recordResponse['data'];
-        _createdRecordId = responseData['id']?.toString() ?? 
-                          responseData['record_id']?.toString();
-        
-        setState(() {
-          _isProcessing = false;
-        });
-        _showSubmitDialog();
-      } else {
-        setState(() {
-          _isProcessing = false;
-        });
-        
-        // Handle authentication errors specifically
-        if (recordResponse['error']?.toString().toLowerCase().contains('authenticated') == true) {
-          _showSnackBar('Session expired. Please login again.', Colors.red);
-        } else {
-          _showSnackBar(
-            recordResponse['message'] ?? 'Failed to create record',
-            Colors.red,
-          );
-        }
-      }
-    } catch (e) {
-      setState(() {
-        _isProcessing = false;
-      });
-      _showSnackBar('Error processing: $e', Colors.red);
-    }
+  if (_selectedImages.isEmpty) {
+    _showSnackBar('Please select at least one image', Colors.orange);
+    return;
   }
 
-  void _showSubmitDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Submit Content'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Title: ${_titleController.text.trim()}'),
-              Text('Images: ${_selectedImages.length}'),
-              Text('Caption words: $_captionWordCount'),
-              Text('Language: $_selectedLanguage'),
-              if (widget.selectedCategory != null)
-                Text('Category: ${widget.selectedCategory}'),
-              if (_currentLatitude != null && _currentLongitude != null)
-                Text('Location: ${_currentLatitude!.toStringAsFixed(4)}, ${_currentLongitude!.toStringAsFixed(4)}'),
-              const SizedBox(height: 16),
-              const Text('Are you ready to upload your images?'),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Continue Editing'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                _uploadImages();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryColor,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Upload'),
-            ),
-          ],
-        );
-      },
-    );
+  if (_titleController.text.trim().isEmpty) {
+    _showSnackBar('Please enter a title', Colors.orange);
+    return;
   }
 
-  Future<void> _uploadImages() async {
-    if (_createdRecordId == null) {
-      _showSnackBar('No record created. Please try again.', Colors.red);
-      return;
+  // Re-check user authentication before submit
+  final currentUserId = _userId ?? await _getCurrentUserId();
+  if (currentUserId == null || currentUserId.isEmpty) {
+    _showSnackBar('Please login to submit content', Colors.red);
+    return;
+  }
+
+  // Validate token before proceeding
+  final tokenValid = await _validateToken();
+  if (!tokenValid) {
+    if (mounted) {
+      _showSnackBar('Session expired. Please login again.', Colors.red);
     }
+    return;
+  }
 
-    setState(() {
-      _isUploading = true;
-    });
+  setState(() {
+    _isProcessing = true;
+  });
 
+  try {
     int successCount = 0;
     int failureCount = 0;
 
+    // Process each image using the unified createAndUploadRecord method
     for (int i = 0; i < _selectedImages.length; i++) {
       try {
         final file = File(_selectedImages[i].path);
-        final uploadResponse = await ApiService.uploadRecord(
-          recordId: _createdRecordId!,
+        
+        // Prepare description for this specific image
+        String imageDescription = _captionController.text.trim();
+        if (_selectedImages.length > 1) {
+          imageDescription += ' (Image ${i + 1} of ${_selectedImages.length})';
+        }
+        
+        // Add location info if available
+        if (_currentLatitude != null && _currentLongitude != null) {
+          imageDescription += ' - Location: ${_currentLatitude!.toStringAsFixed(6)}, ${_currentLongitude!.toStringAsFixed(6)}';
+        }
+
+        // Get category ID - provide a default if null or invalid
+        String categoryIdToUse = (_categoryId != null && UuidService.isValidUuid(_categoryId!)) 
+            ? _categoryId! 
+            : 'default'; // Provide a default value instead of null
+
+        final result = await ApiService.createAndUploadRecord(
+          title: '${_titleController.text.trim()}${_selectedImages.length > 1 ? ' - Image ${i + 1}' : ''}',
+          description: imageDescription,
+          userId: currentUserId,
+          mediaType: 'image',
+          categoryId: categoryIdToUse, // Now guaranteed to be non-null
           file: file,
-          description: 'Image ${i + 1} - ${_captionController.text.trim()}',
+          latitude: _currentLatitude,
+          longitude: _currentLongitude,
         );
 
-        if (uploadResponse['success'] == true) {
+        if (result['success'] == true) {
           successCount++;
+          print('Successfully uploaded image ${i + 1}: ${result['message'] ?? 'Success'}');
         } else {
           failureCount++;
-          print('Upload failed for image $i: ${uploadResponse['message']}');
+          print('Upload failed for image ${i + 1}: ${result['message'] ?? 'Unknown error'}');
         }
       } catch (e) {
         failureCount++;
-        print('Upload error for image $i: $e');
+        print('Upload error for image ${i + 1}: $e');
+        
+        // Check for authentication errors
+        if (e.toString().contains('User not authenticated') ||
+            e.toString().contains('401') ||
+            e.toString().contains('422') ||
+            e.toString().contains('Unauthorized')) {
+          _showSnackBar('Authentication failed. Please login again.', Colors.red);
+          break; // Stop processing if authentication fails
+        }
       }
     }
 
     setState(() {
-      _isUploading = false;
+      _isProcessing = false;
     });
 
+    // Show results
     if (successCount > 0) {
       _showSnackBar(
         'Successfully uploaded $successCount/${_selectedImages.length} images',
@@ -356,79 +426,144 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
       );
       
       if (failureCount == 0) {
-        // All images uploaded successfully, navigate back
+        // All images uploaded successfully, navigate back after delay
         Future.delayed(const Duration(seconds: 2), () {
-          // ignore: use_build_context_synchronously
-          Navigator.pop(context);
+          if (mounted) {
+            Navigator.pop(context);
+          }
         });
       }
     } else {
       _showSnackBar('Failed to upload images. Please try again.', Colors.red);
     }
+
+  } catch (e) {
+    setState(() {
+      _isProcessing = false;
+    });
+    
+    // Handle specific authentication errors
+    String errorMessage = 'Error processing images: $e';
+    if (e.toString().contains('User not authenticated') ||
+        e.toString().contains('401') ||
+        e.toString().contains('422') ||
+        e.toString().contains('Unauthorized')) {
+      errorMessage = 'Authentication failed. Please login again.';
+    }
+    
+    _showSnackBar(errorMessage, Colors.red);
+  }
+}
+
+Future<void> _saveDraft() async {
+  if (_titleController.text.trim().isEmpty && 
+      _captionController.text.trim().isEmpty && 
+      _selectedImages.isEmpty) {
+    _showSnackBar('Nothing to save', Colors.orange);
+    return;
   }
 
-  Future<void> _saveDraft() async {
-    if (_titleController.text.trim().isEmpty && 
-        _captionController.text.trim().isEmpty && 
-        _selectedImages.isEmpty) {
-      _showSnackBar('Nothing to save', Colors.orange);
-      return;
-    }
+  // Re-check user authentication before saving
+  final currentUserId = _userId ?? await _getCurrentUserId();
+  if (currentUserId == null || currentUserId.isEmpty) {
+    _showSnackBar('Please login to save draft', Colors.red);
+    return;
+  }
 
-    // Check authentication
-    final isAuthenticated = await TokenStorageService.isAuthenticated();
-    if (!isAuthenticated) {
-      _showSnackBar('Please login again to save draft', Colors.red);
-      return;
+  // Validate token before proceeding
+  final tokenValid = await _validateToken();
+  if (!tokenValid) {
+    if (mounted) {
+      _showSnackBar('Session expired. Please login again.', Colors.red);
     }
+    return;
+  }
+
+  setState(() {
+    _isProcessing = true;
+  });
+
+  try {
+    // Get category ID - provide a default if null or invalid
+    String categoryIdToUse = (_categoryId != null && UuidService.isValidUuid(_categoryId!)) 
+        ? _categoryId! 
+        : 'default'; // Provide a default value instead of null
+
+    final recordResponse = await ApiService.createRecord(
+      title: _titleController.text.trim().isEmpty 
+          ? 'Draft - ${DateTime.now().toString().substring(0, 16)}' 
+          : 'Draft - ${_titleController.text.trim()}',
+      description: _captionController.text.trim(),
+      categoryId: categoryIdToUse, // Now guaranteed to be non-null
+      userId: currentUserId,
+      mediaType: 'image',
+      latitude: _currentLatitude,
+      longitude: _currentLongitude,
+      fileName: 'draft',
+      fileSize: 0,
+    );
 
     setState(() {
-      _isProcessing = true;
+      _isProcessing = false;
     });
 
-    try {
-      // Use the stored user ID or fallback to widget parameter
-      final userId = _currentUserId ?? widget.userId ?? 'default_user';
-      
-      final recordResponse = await ApiService.createRecord(
-        title: _titleController.text.trim().isEmpty 
-            ? 'Draft - ${DateTime.now().toString().substring(0, 16)}' 
-            : 'Draft - ${_titleController.text.trim()}',
-        description: _captionController.text.trim(),
-        categoryId: widget.categoryId ?? '1',
-        userId: userId,
-        mediaType: 'image',
-        latitude: _currentLatitude,
-        longitude: _currentLongitude,
-        fileName: 'draft',
-        fileSize: 0,
-      );
-
-      setState(() {
-        _isProcessing = false;
-      });
-
-      if (recordResponse['success'] == true) {
-        _showSnackBar('Draft saved successfully', Colors.green);
-      } else {
-        _showSnackBar('Failed to save draft', Colors.red);
-      }
-    } catch (e) {
-      setState(() {
-        _isProcessing = false;
-      });
-      _showSnackBar('Error saving draft: $e', Colors.red);
+    if (recordResponse['success'] == true) {
+      _showSnackBar('Draft saved successfully', Colors.green);
+      print('Draft saved with ID: ${recordResponse['data']?['id']}');
+    } else {
+      _showSnackBar('Failed to save draft: ${recordResponse['message'] ?? 'Unknown error'}', Colors.red);
+      print('Draft save failed: ${recordResponse['message']}');
     }
+  } catch (e) {
+    setState(() {
+      _isProcessing = false;
+    });
+    
+    // Handle authentication errors
+    String errorMessage = 'Error saving draft: $e';
+    if (e.toString().contains('User not authenticated') ||
+        e.toString().contains('401') ||
+        e.toString().contains('422') ||
+        e.toString().contains('Unauthorized')) {
+      errorMessage = 'Authentication failed. Please login again.';
+    }
+    
+    _showSnackBar(errorMessage, Colors.red);
+    print('Draft save error: $e');
   }
+}
+
+// Helper method to validate category before operations
+bool _isValidCategory() {
+  return _categoryId != null && UuidService.isValidUuid(_categoryId!);
+}
+
+  Future<void> _refreshCategoryData() async {
+  try {
+    if (_effectiveCategory != null) {
+      final newCategoryId = await UuidService.getCategoryUuid(_effectiveCategory!);
+      if (newCategoryId != null && newCategoryId != _categoryId) {
+        setState(() {
+          _categoryId = newCategoryId;
+        });
+        print('Updated category ID: $_categoryId for category: $_effectiveCategory');
+      }
+    }
+  } catch (e) {
+    print('Error refreshing category data: $e');
+  }
+}
 
   void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: color,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void _clearAll() {
@@ -466,6 +601,23 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Show loading screen during initialization
+    if (_isInitializing) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F7FA),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: kPrimaryColor),
+              SizedBox(height: 16),
+              Text('Initializing...', style: TextStyle(color: kPrimaryColor)),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
@@ -616,7 +768,6 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                 ],
               ),
             ),
-
             // Main Content
             Expanded(
               child: SingleChildScrollView(
@@ -901,55 +1052,39 @@ class _PictureInputScreenState extends State<PictureInputScreen> {
                   const SizedBox(width: 12),
                   
                   // Process/Upload Button
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton(
-                      onPressed: _isProcessing || _isUploading 
-                          ? null 
-                          : (_createdRecordId != null ? _uploadImages : _processImages),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: kPrimaryColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                      child: _isUploading
-                          ? const Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                  ),
-                                ),
-                                SizedBox(width: 8),
-                                Text('Uploading...'),
-                              ],
-                            )
-                          : _isProcessing
-                              ? const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text('Processing...'),
-                                  ],
-                                )
-                              : Text(_createdRecordId != null ? 'Upload Images' : 'Process & Upload'),
-                    ),
-                  ),
+                  // Process/Upload Button
+Expanded(
+  flex: 2,
+  child: ElevatedButton(
+    onPressed: _isProcessing ? null : _processImages,
+    style: ElevatedButton.styleFrom(
+      backgroundColor: kPrimaryColor,
+      foregroundColor: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 12),
+    ),
+    child: _isProcessing
+        ? const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                height: 20,
+                width: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
+              ),
+              SizedBox(width: 8),
+              Text('Processing...'),
+            ],
+          )
+        : const Text('Process & Upload Images'),
+  ),
+),
+
                 ],
               ),
             ),

@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../constants.dart';
 import '../../services/api_service.dart';
+import '../../services/uuid_service.dart'; // ADD THIS IMPORT
 
 class VideoInputScreen extends StatefulWidget {
   final String? selectedCategory;
@@ -41,6 +42,25 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
   double? _longitude;
   int _currentUploadIndex = 0;
 
+  // ADD: Fallback categories map for when categoryId is null
+  final Map<String, String> _fallbackCategories = {
+    'Fables': '379d6867-57c1-4f57-b6ee-fb734313e538',
+    'Events': '7a184c41-1a49-4beb-a01a-d8dc01693b15',
+    'Music': '94979e9f-4895-4cd7-8601-ad53d8099bf4',
+    'Places': '96e5104f-c786-4928-b932-f59f5b4ddbf0',
+    'Food': '833299f6-ff1c-4fde-804f-6d3b3877c76e',
+    'People': 'af8b7a27-00b4-4192-9fa6-90152a0640b2',
+    'Literature': '74b133e7-e496-4e9d-85b0-3bd5eb4c3871',
+    'Architecture': '94a13c20-8a03-45da-8829-10e2fe1e61a1',
+    'Skills': '6f6f5023-a99e-4a29-a44a-6d5acbf88085',
+    'Images': '4366cab1-031e-4b37-816b-311ee34461a9',
+    'Culture': 'ab9fa2ce-1f83-4e91-b89d-cca18e8b301e',
+    'Flora & Fauna': '5f40610f-ae47-4472-944c-cb899128ebbf',
+    'Education': '784ddb92-9540-4ce1-b4e4-6c1b7b18849d',
+    'Vegetation': '2f831ae2-f0cd-4142-8646-68dd195dfba2',
+    'Dance': '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +75,23 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     _descriptionController.dispose();
     _titleController.dispose();
     super.dispose();
+  }
+
+  // ADD: Helper method to get the appropriate category ID
+  String _getCategoryId() {
+    // First try to use the provided categoryId
+    if (widget.categoryId != null && widget.categoryId!.isNotEmpty) {
+      return widget.categoryId!;
+    }
+    
+    // If no categoryId, try to get it from selectedCategory name
+    if (widget.selectedCategory != null) {
+      final categoryId = _fallbackCategories[widget.selectedCategory!];
+      if (categoryId != null) return categoryId;
+    }
+    
+    // Default fallback to Music category
+    return '94979e9f-4895-4cd7-8601-ad53d8099bf4';
   }
 
   void _updateDescriptionWordCount() {
@@ -162,11 +199,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       return;
     }
 
-    // Validate category ID
-    if (widget.categoryId == null || widget.categoryId!.isEmpty) {
-      _showSnackBar('Category is required', Colors.orange);
-      return;
-    }
+    final categoryId = _getCategoryId(); // Use helper method
 
     setState(() {
       _isProcessing = true;
@@ -181,7 +214,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       final recordResult = await ApiService.createRecord(
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
-        categoryId: widget.categoryId!,
+        categoryId: categoryId, // Use the helper method result
         userId: widget.userId,
         mediaType: 'video',
         latitude: _latitude,
@@ -275,7 +308,16 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     try {
       int successfulUploads = 0;
       List<String> failedUploads = [];
-      
+
+      // Get current user ID
+      final userId = await UuidService.getCurrentUserId();
+      if (userId == null) {
+        _showSnackBar('User not authenticated', Colors.red);
+        return;
+      }
+
+      final categoryId = _getCategoryId(); // Use helper method
+
       for (int i = 0; i < _selectedVideos.length; i++) {
         setState(() {
           _currentUploadIndex = i + 1;
@@ -284,7 +326,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
 
         final video = _selectedVideos[i];
         final file = File(video.path);
-        
+
         // Verify file exists and is readable
         if (!await file.exists()) {
           failedUploads.add('Video ${i + 1}: File not found');
@@ -292,12 +334,17 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
         }
 
         try {
+          // FIXED: Use the correct property name and helper method
           final uploadResult = await ApiService.uploadRecord(
             recordId: _createdRecordId!,
             file: file,
+            title: 'Video Upload - ${DateTime.now().toString().split('.')[0]}',
+            categoryId: categoryId, // Use helper method instead of widget.selectedCategoryId
+            userId: userId,
+            mediaType: 'video',
             description: '${_descriptionController.text.trim()} - Video ${i + 1}',
           );
-          
+
           if (uploadResult['success']) {
             successfulUploads++;
             _showSnackBar('Video ${i + 1} uploaded successfully', Colors.green);
@@ -311,11 +358,11 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           _showSnackBar('Error uploading video ${i + 1}: $e', Colors.red);
         }
       }
-      
+
       setState(() {
         _uploadProgress = 1.0;
       });
-      
+
       // Show final result
       if (successfulUploads == _selectedVideos.length) {
         _showSuccessDialog();
@@ -324,7 +371,6 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       } else {
         _showFailureDialog(failedUploads);
       }
-      
     } catch (e) {
       _showSnackBar('Upload error: $e', Colors.red);
     } finally {
@@ -835,10 +881,10 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                             _buildInfoItem(
                               icon: Icons.storage,
                               value: _formatFileSize(_totalSize),
-                              label: 'Total Size',
+                              label: 'Size',
                             ),
                             _buildInfoItem(
-                              icon: Icons.timer,
+                              icon: Icons.access_time,
                               value: _formatDuration(_totalDuration),
                               label: 'Duration',
                             ),
@@ -848,83 +894,10 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Title Input
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            offset: const Offset(0, 2),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.title, color: kPrimaryColor),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Title *',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                'Words: $_titleWordCount',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: _titleController,
-                            maxLines: 1,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              height: 1.5,
-                            ),
-                            decoration: InputDecoration(
-                              hintText: _selectedLanguage == 'Telugu' 
-                                  ? 'మీ వీడియోకు శీర్షిక రాయండి...'
-                                  : 'Enter a title for your video...',
-                              hintStyle: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 16,
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: kPrimaryColor),
-                              ),
-                              contentPadding: const EdgeInsets.all(12),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
                     // Selected Videos List
                     if (_selectedVideos.isNotEmpty) ...[
                       Container(
                         margin: const EdgeInsets.symmetric(horizontal: 16),
-                        padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white,
                           borderRadius: BorderRadius.circular(12),
@@ -939,89 +912,71 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.video_collection, color: kPrimaryColor),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Selected Videos',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
+                            Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.video_collection, color: kPrimaryColor),
+                                  const SizedBox(width: 8),
+                                  const Text(
+                                    'Selected Videos',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                ),
-                                const Spacer(),
-                                Text(
-                                  '${_selectedVideos.length}/3',
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey,
+                                  const Spacer(),
+                                  Text(
+                                    '${_selectedVideos.length}/3',
+                                    style: const TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 14,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                            const SizedBox(height: 16),
                             ListView.separated(
                               shrinkWrap: true,
                               physics: const NeverScrollableScrollPhysics(),
                               itemCount: _selectedVideos.length,
-                              separatorBuilder: (context, index) => const SizedBox(height: 8),
+                              separatorBuilder: (context, index) => const Divider(height: 1),
                               itemBuilder: (context, index) {
                                 final video = _selectedVideos[index];
                                 final sizeInMB = _videoSizes[index] / (1024 * 1024);
                                 
-                                return Container(
-                                  padding: const EdgeInsets.all(12),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[50],
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.grey[200]!),
+                                return ListTile(
+                                  leading: Container(
+                                    width: 50,
+                                    height: 40,
+                                    decoration: BoxDecoration(
+                                      color: kPrimaryColor.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: const Icon(
+                                      Icons.play_arrow,
+                                      color: kPrimaryColor,
+                                    ),
                                   ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 40,
-                                        height: 40,
-                                        decoration: BoxDecoration(
-                                          color: kPrimaryColor.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(8),
-                                        ),
-                                        child: const Icon(
-                                          Icons.play_arrow,
-                                          color: kPrimaryColor,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              video.name,
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              '${_formatFileSize(sizeInMB)} • Video ${index + 1}',
-                                              style: const TextStyle(
-                                                fontSize: 12,
-                                                color: Colors.grey,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      IconButton(
-                                        onPressed: () => _removeVideo(index),
-                                        icon: const Icon(Icons.close, color: Colors.red),
-                                        iconSize: 20,
-                                      ),
-                                    ],
+                                  title: Text(
+                                    video.name,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  subtitle: Text(
+                                    _formatFileSize(sizeInMB),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  trailing: IconButton(
+                                    onPressed: () => _removeVideo(index),
+                                    icon: const Icon(Icons.close, color: Colors.red),
                                   ),
                                 );
                               },
@@ -1032,10 +987,9 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Description Input
+                    // Title Input
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 16),
-                      padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
@@ -1047,160 +1001,168 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                           ),
                         ],
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(Icons.description, color: kPrimaryColor),
-                              const SizedBox(width: 8),
-                              const Text(
-                                'Description',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.title, color: kPrimaryColor),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Title',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
                                 ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                'Words: $_descriptionWordCount',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
+                                const Text(
+                                  ' *',
+                                  style: TextStyle(color: Colors.red),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          TextField(
-                            controller: _descriptionController,
-                            maxLines: 4,
-                            minLines: 3,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              height: 1.5,
+                                const Spacer(),
+                                Text(
+                                  '$_titleWordCount words',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
                             ),
-                            decoration: InputDecoration(
-                              hintText: _selectedLanguage == 'Telugu' 
-                                  ? 'మీ వీడియో గురించి వివరంగా రాయండి...'
-                                  : 'Tell us more about your video...',
-                              hintStyle: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 16,
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _titleController,
+                              maxLines: 2,
+                              maxLength: 200,
+                              decoration: const InputDecoration(
+                                hintText: 'Enter a descriptive title for your video...',
+                                border: OutlineInputBorder(),
+                                counterText: '',
                               ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: BorderSide(color: Colors.grey.shade300),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: kPrimaryColor),
-                              ),
-                              contentPadding: const EdgeInsets.all(12),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 16),
+
+                    // Description Input
+                    Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            offset: const Offset(0, 2),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.description, color: kPrimaryColor),
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Description',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  '$_descriptionWordCount words',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _descriptionController,
+                              maxLines: 4,
+                              maxLength: 1000,
+                              decoration: const InputDecoration(
+                                hintText: 'Describe your video content, context, and any relevant details...',
+                                border: OutlineInputBorder(),
+                                counterText: '',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 100), // Space for bottom button
                   ],
                 ),
               ),
             ),
+          ],
+        ),
+      ),
 
-            // Bottom Action Bar
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    offset: const Offset(0, -2),
-                    blurRadius: 8,
-                  ),
-                ],
+      // Bottom Action Buttons
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              offset: const Offset(0, -2),
+              blurRadius: 8,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              flex: 1,
+              child: OutlinedButton.icon(
+                onPressed: _isProcessing || _isUploading ? null : _saveDraft,
+                icon: const Icon(Icons.save),
+                label: const Text('Save Draft'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  side: const BorderSide(color: kPrimaryColor),
+                  foregroundColor: kPrimaryColor,
+                ),
               ),
-              child: SafeArea(
-                child: Row(
-                  children: [
-                    // Save Draft Button
-                    if (_selectedVideos.isNotEmpty || 
-                        _titleController.text.isNotEmpty || 
-                        _descriptionController.text.isNotEmpty) ...[
-                      OutlinedButton(
-                        onPressed: _saveDraft,
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: kPrimaryColor),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 12,
-                          ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: ElevatedButton.icon(
+                onPressed: _isProcessing || _isUploading ? null : _processVideos,
+                icon: _isProcessing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
-                        child: const Text(
-                          'Save Draft',
-                          style: TextStyle(color: kPrimaryColor),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-
-                    // Process/Submit Button
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _isProcessing || _isUploading ? null : _processVideos,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: kPrimaryColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          elevation: 2,
-                        ),
-                        child: _isProcessing
-                            ? const Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  ),
-                                  SizedBox(width: 8),
-                                  Text('Processing...'),
-                                ],
-                              )
-                            : _isUploading
-                                ? const Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                        ),
-                                      ),
-                                      SizedBox(width: 8),
-                                      Text('Uploading...'),
-                                    ],
-                                  )
-                                : const Text(
-                                    'Submit Videos',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                      ),
-                    ),
-                  ],
+                      )
+                    : const Icon(Icons.cloud_upload),
+                label: Text(_isProcessing ? 'Processing...' : 'Submit'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  backgroundColor: kPrimaryColor,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey,
                 ),
               ),
             ),
@@ -1216,9 +1178,8 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+    return GestureDetector(
+      onTap: _isProcessing || _isUploading ? null : onTap,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -1286,7 +1247,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           value,
           style: const TextStyle(
             fontSize: 14,
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w600,
             color: kPrimaryColor,
           ),
         ),

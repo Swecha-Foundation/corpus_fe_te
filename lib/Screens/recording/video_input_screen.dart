@@ -1,22 +1,26 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, avoid_print
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'dart:io';
 import '../../constants.dart';
 import '../../services/api_service.dart';
-import '../../services/uuid_service.dart'; // ADD THIS IMPORT
+import '../../services/uuid_service.dart';
+import '../../services/token_storage_service.dart';
 
 class VideoInputScreen extends StatefulWidget {
   final String? selectedCategory;
   final String? categoryId;
-  final String userId;
+  final String? selectedCategoryId;
+  final String? userId;
   
   const VideoInputScreen({
     Key? key,
     this.selectedCategory,
     this.categoryId,
-    required this.userId,
+    this.selectedCategoryId,
+    this.userId,
   }) : super(key: key);
 
   @override
@@ -31,6 +35,8 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
   final List<int> _videoSizes = []; // Store actual file sizes
   bool _isProcessing = false;
   bool _isUploading = false;
+  bool _isLoadingLocation = false;
+  bool _isInitializing = false;
   String _selectedLanguage = 'Telugu';
   int _descriptionWordCount = 0;
   int _titleWordCount = 0;
@@ -38,11 +44,20 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
   double _totalSize = 0.0; // In MB
   double _uploadProgress = 0.0;
   String? _createdRecordId;
-  double? _latitude;
-  double? _longitude;
   int _currentUploadIndex = 0;
 
-  // ADD: Fallback categories map for when categoryId is null
+  // ADD THESE MISSING VARIABLES TO YOUR CLASS
+  String? _userId; // Current user ID
+  String? _effectiveCategory; // The category name being used
+  String? _categoryId; // The UUID of the category
+  List<String> _availableCategories = []; // List of available category names
+
+  // Location variables
+  double? _currentLatitude;
+  double? _currentLongitude;
+  String _locationStatus = 'Location not available';
+
+  // Fallback categories map for when categoryId is null
   final Map<String, String> _fallbackCategories = {
     'Fables': '379d6867-57c1-4f57-b6ee-fb734313e538',
     'Events': '7a184c41-1a49-4beb-a01a-d8dc01693b15',
@@ -66,6 +81,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     super.initState();
     _descriptionController.addListener(_updateDescriptionWordCount);
     _titleController.addListener(_updateTitleWordCount);
+    _initializeData();
   }
 
   @override
@@ -77,9 +93,150 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     super.dispose();
   }
 
-  // ADD: Helper method to get the appropriate category ID
+  // Initialize data with proper authentication and categories
+  Future<void> _initializeData() async {
+    setState(() {
+      _isInitializing = true;
+    });
+
+    try {
+      // Initialize UUID service
+      await UuidService.initialize();
+      
+      // Get current user ID - try multiple methods
+      _userId = await _getCurrentUserId();
+      print('DEBUG: Retrieved user ID: $_userId');
+      
+      // Get available categories
+      final categories = await UuidService.getCategories();
+      _availableCategories = categories.keys.toList();
+      
+      // If no categories available, add a default one
+      if (_availableCategories.isEmpty) {
+        _availableCategories = ['General'];
+      }
+      
+      // Determine effective category and ID
+      if (widget.selectedCategoryId != null && UuidService.isValidUuid(widget.selectedCategoryId!)) {
+        // Use provided category ID
+        _categoryId = widget.selectedCategoryId;
+        _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ?? 
+                            widget.selectedCategory ?? 'General';
+      } else if (widget.selectedCategory != null) {
+        // Use provided category name
+        _effectiveCategory = widget.selectedCategory!;
+        _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
+      } else {
+        // Use default category
+        _effectiveCategory = _availableCategories.isNotEmpty ? 
+                            _availableCategories[0] : 'General';
+        _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
+      }
+      
+      // Check if user is authenticated
+      if (_userId == null || _userId!.isEmpty) {
+        print('DEBUG: User ID is null or empty');
+        if (mounted) {
+          _showSnackBar('Please login to submit content', Colors.orange);
+        }
+      } else {
+        print('DEBUG: User is authenticated with ID: $_userId');
+      }
+
+      // Get location in parallel
+      _getCurrentLocation();
+
+    } catch (e) {
+      print('Error initializing data: $e');
+      if (mounted) {
+        _showSnackBar('Error loading data: ${e.toString()}', Colors.red);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    }
+  }
+
+  // Enhanced user ID retrieval with multiple fallback methods
+  Future<String?> _getCurrentUserId() async {
+    try {
+      // Method 1: Try TokenStorageService first
+      String? userId = await TokenStorageService.getUserId();
+      if (userId != null && userId.isNotEmpty) {
+        return userId;
+      }
+
+      // Method 2: Try widget parameter
+      if (widget.userId != null && widget.userId!.isNotEmpty) {
+        return widget.userId;
+      }
+
+      // Method 3: Try to get from current user API call
+      try {
+        final userResult = await ApiService.getCurrentUser();
+        if (userResult['success'] == true && userResult['data'] != null) {
+          final userData = userResult['data'];
+          if (userData['id'] != null) {
+            return userData['id'].toString();
+          }
+        }
+      } catch (e) {
+        print('DEBUG: Failed to get user from API: $e');
+      }
+
+      return null;
+    } catch (e) {
+      print('DEBUG: Error in _getCurrentUserId: $e');
+      return null;
+    }
+  }
+
+  // Validate token before critical operations
+  Future<bool> _validateToken() async {
+    try {
+      final isValid = await TokenStorageService.isTokenValid();
+      if (!isValid) {
+        print('DEBUG: Token expired');
+        return false;
+      }
+
+      final token = await TokenStorageService.getAuthToken();
+      if (token == null || token.isEmpty) {
+        print('DEBUG: No token found');
+        return false;
+      }
+
+      // Test the token by making a simple API call
+      try {
+        final testResult = await ApiService.getCurrentUser();
+        if (testResult['success']) {
+          print('DEBUG: Token validation passed');
+          return true;
+        } else {
+          print('DEBUG: Token validation failed: ${testResult['error']}');
+          return false;
+        }
+      } catch (e) {
+        print('DEBUG: Token test failed: $e');
+        return false;
+      }
+    } catch (e) {
+      print('DEBUG: Token validation error: $e');
+      return false;
+    }
+  }
+
+  // Helper method to get the appropriate category ID
   String _getCategoryId() {
-    // First try to use the provided categoryId
+    // First try to use the determined categoryId from initialization
+    if (_categoryId != null && _categoryId!.isNotEmpty) {
+      return _categoryId!;
+    }
+    
+    // Fallback to provided categoryId
     if (widget.categoryId != null && widget.categoryId!.isNotEmpty) {
       return widget.categoryId!;
     }
@@ -106,6 +263,156 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     setState(() {
       _titleWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
     });
+  }
+
+  // Location Services with proper permission handling
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLoadingLocation = true;
+      _locationStatus = 'Getting location...';
+    });
+
+    try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _showLocationServicesDialog();
+        setState(() {
+          _locationStatus = 'Location services are disabled';
+          _isLoadingLocation = false;
+        });
+        return;
+      }
+
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          _showLocationPermissionDialog();
+          setState(() {
+            _locationStatus = 'Location permissions are denied';
+            _isLoadingLocation = false;
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        _showLocationPermissionDeniedForeverDialog();
+        setState(() {
+          _locationStatus = 'Location permissions are permanently denied';
+          _isLoadingLocation = false;
+        });
+        return;
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
+      );
+
+      setState(() {
+        _currentLatitude = position.latitude;
+        _currentLongitude = position.longitude;
+        _locationStatus = 'Location: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+        _isLoadingLocation = false;
+      });
+
+      _showSnackBar('Location obtained successfully', Colors.green);
+    } catch (e) {
+      setState(() {
+        _locationStatus = 'Failed to get location: $e';
+        _isLoadingLocation = false;
+      });
+      print('Location error: $e');
+      _showSnackBar('Failed to get location', Colors.orange);
+    }
+  }
+
+  // Show dialog when location services are disabled
+  void _showLocationServicesDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Services Disabled'),
+          content: const Text(
+            'Location services are disabled on your device. Please enable location services in your device settings to add location information to your videos.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Geolocator.openLocationSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Show dialog when location permission is denied
+  void _showLocationPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Permission Required'),
+          content: const Text(
+            'This app needs location permission to add location information to your videos. This helps others discover content from your area.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Not Now'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _getCurrentLocation(); // Retry
+              },
+              child: const Text('Grant Permission'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // Show dialog when location permission is permanently denied
+  void _showLocationPermissionDeniedForeverDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Location Permission Denied'),
+          content: const Text(
+            'Location permission has been permanently denied. To enable location for your videos, please go to app settings and grant location permission.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Geolocator.openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _recordVideo() async {
@@ -199,6 +506,19 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       return;
     }
 
+    // Validate authentication before processing
+    if (_userId == null || _userId!.isEmpty) {
+      _showSnackBar('Please login to submit content', Colors.red);
+      return;
+    }
+
+    // Validate token
+    final isTokenValid = await _validateToken();
+    if (!isTokenValid) {
+      _showSnackBar('Session expired. Please login again', Colors.red);
+      return;
+    }
+
     final categoryId = _getCategoryId(); // Use helper method
 
     setState(() {
@@ -214,11 +534,11 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       final recordResult = await ApiService.createRecord(
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
-        categoryId: categoryId, // Use the helper method result
-        userId: widget.userId,
+        categoryId: categoryId,
+        userId: _userId!,
         mediaType: 'video',
-        latitude: _latitude,
-        longitude: _longitude,
+        latitude: _currentLatitude,
+        longitude: _currentLongitude,
         fileName: _selectedVideos[largestVideoIndex].name,
         fileSize: largestVideoSize,
       );
@@ -263,10 +583,10 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
               Text('Estimated duration: ${_formatDuration(_totalDuration)}'),
               Text('Description words: $_descriptionWordCount'),
               Text('Language: $_selectedLanguage'),
-              if (widget.selectedCategory != null)
-                Text('Category: ${widget.selectedCategory}'),
-              if (_latitude != null && _longitude != null)
-                Text('Location: ${_latitude!.toStringAsFixed(4)}, ${_longitude!.toStringAsFixed(4)}'),
+              if (_effectiveCategory != null)
+                Text('Category: $_effectiveCategory'),
+              if (_currentLatitude != null && _currentLongitude != null)
+                Text('Location: ${_currentLatitude!.toStringAsFixed(4)}, ${_currentLongitude!.toStringAsFixed(4)}'),
               const SizedBox(height: 16),
               const Text('Record created successfully! Ready to upload videos?'),
             ],
@@ -299,6 +619,12 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       return;
     }
 
+    // Final authentication check
+    if (_userId == null || _userId!.isEmpty) {
+      _showSnackBar('Authentication required', Colors.red);
+      return;
+    }
+
     setState(() {
       _isUploading = true;
       _uploadProgress = 0.0;
@@ -308,15 +634,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     try {
       int successfulUploads = 0;
       List<String> failedUploads = [];
-
-      // Get current user ID
-      final userId = await UuidService.getCurrentUserId();
-      if (userId == null) {
-        _showSnackBar('User not authenticated', Colors.red);
-        return;
-      }
-
-      final categoryId = _getCategoryId(); // Use helper method
+      final categoryId = _getCategoryId();
 
       for (int i = 0; i < _selectedVideos.length; i++) {
         setState(() {
@@ -334,13 +652,12 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
         }
 
         try {
-          // FIXED: Use the correct property name and helper method
           final uploadResult = await ApiService.uploadRecord(
             recordId: _createdRecordId!,
             file: file,
             title: 'Video Upload - ${DateTime.now().toString().split('.')[0]}',
-            categoryId: categoryId, // Use helper method instead of widget.selectedCategoryId
-            userId: userId,
+            categoryId: categoryId,
+            userId: _userId!,
             mediaType: 'video',
             description: '${_descriptionController.text.trim()} - Video ${i + 1}',
           );
@@ -526,14 +843,12 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     _showSnackBar('Draft saved locally', Colors.green);
   }
 
-  Future<void> _getLocation() async {
-    // This would typically use location services
-    // For now, we'll show a dialog to manually enter coordinates or get from GPS
+  Future<void> _getLocationManually() async {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        final latController = TextEditingController(text: _latitude?.toString() ?? '');
-        final lngController = TextEditingController(text: _longitude?.toString() ?? '');
+        final latController = TextEditingController(text: _currentLatitude?.toString() ?? '');
+        final lngController = TextEditingController(text: _currentLongitude?.toString() ?? '');
         
         return AlertDialog(
           title: const Text('Add Location'),
@@ -563,8 +878,9 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
             TextButton(
               onPressed: () {
                 setState(() {
-                  _latitude = null;
-                  _longitude = null;
+                  _currentLatitude = null;
+                  _currentLongitude = null;
+                  _locationStatus = 'Location not available';
                 });
                 Navigator.pop(context);
               },
@@ -580,64 +896,17 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                 final lng = double.tryParse(lngController.text);
                 if (lat != null && lng != null) {
                   setState(() {
-                    _latitude = lat;
-                    _longitude = lng;
+                    _currentLatitude = lat;
+                    _currentLongitude = lng;
+                    _locationStatus = 'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
                   });
                   Navigator.pop(context);
-                  _showSnackBar('Location added', Colors.green);
+                  _showSnackBar('Location set manually', Colors.green);
                 } else {
-                  _showSnackBar('Invalid coordinates', Colors.red);
+                  _showSnackBar('Please enter valid coordinates', Colors.red);
                 }
               },
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showSnackBar(String message, Color color) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: color,
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  void _clearAll() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Clear All'),
-          content: const Text('Are you sure you want to clear all videos and text?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-                setState(() {
-                  _selectedVideos.clear();
-                  _videoSizes.clear();
-                  _titleController.clear();
-                  _descriptionController.clear();
-                  _totalDuration = 0.0;
-                  _totalSize = 0.0;
-                  _createdRecordId = null;
-                  _latitude = null;
-                  _longitude = null;
-                });
-              },
-              child: const Text(
-                'Clear',
-                style: TextStyle(color: Colors.red),
-              ),
+              child: const Text('Set'),
             ),
           ],
         );
@@ -651,614 +920,772 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     return '${minutes}m ${remainingSeconds}s';
   }
 
-  String _formatFileSize(double sizeInMB) {
-    if (sizeInMB < 1) {
-      return '${(sizeInMB * 1024).toStringAsFixed(0)} KB';
+  void _showSnackBar(String message, Color color) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: color,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     }
-    return '${sizeInMB.toStringAsFixed(1)} MB';
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F7FA),
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 2,
-        leading: IconButton(
-          onPressed: () => Navigator.pop(context),
-          icon: const Icon(Icons.arrow_back, color: kPrimaryColor),
-        ),
-        title: const Text(
-          'Video Input',
-          style: TextStyle(
-            color: kPrimaryColor,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        actions: [
-          IconButton(
-            onPressed: _getLocation,
-            icon: Icon(
-              _latitude != null && _longitude != null 
-                  ? Icons.location_on 
-                  : Icons.location_off,
-              color: _latitude != null && _longitude != null 
-                  ? kPrimaryColor 
-                  : Colors.grey,
-            ),
-          ),
-          if (_selectedVideos.isNotEmpty || 
-              _titleController.text.isNotEmpty || 
-              _descriptionController.text.isNotEmpty)
-            IconButton(
-              onPressed: _clearAll,
-              icon: const Icon(Icons.clear, color: Colors.red),
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header Info
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
-                    offset: const Offset(0, 2),
-                    blurRadius: 8,
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: kPrimaryColor.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          widget.selectedCategory ?? 'General',
-                          style: const TextStyle(
-                            color: kPrimaryColor,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      const Spacer(),
-                      DropdownButton<String>(
-                        value: _selectedLanguage,
-                        underline: Container(),
-                        items: ['Telugu', 'English'].map((String value) {
-                          return DropdownMenuItem<String>(
-                            value: value,
-                            child: Text(
-                              value,
-                              style: const TextStyle(fontSize: 14),
-                            ),
-                          );
-                        }).toList(),
-                        onChanged: (String? newValue) {
-                          setState(() {
-                            _selectedLanguage = newValue!;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Share your video story',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _latitude != null && _longitude != null
-                        ? 'Record or select videos and add descriptions (Location: ${_latitude!.toStringAsFixed(4)}, ${_longitude!.toStringAsFixed(4)})'
-                        : 'Record or select videos and add descriptions',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey,
-                    ),
-                  ),
-                ],
+  return Scaffold(
+    backgroundColor: Colors.grey[50],
+    appBar: AppBar(
+      title: const Text('Create Video Content'),
+      backgroundColor: kPrimaryColor,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      actions: [
+        if (!_isProcessing && !_isUploading)
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            child: TextButton.icon(
+              onPressed: _saveDraft,
+              icon: const Icon(Icons.save_outlined, color: Colors.white, size: 20),
+              label: const Text('Save Draft', style: TextStyle(color: Colors.white)),
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.2),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               ),
             ),
-
-            // Upload Progress Indicator
-            if (_isUploading) ...[
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      offset: const Offset(0, 2),
-                      blurRadius: 8,
-                    ),
-                  ],
+          ),
+      ],
+    ),
+    body: _isInitializing
+        ? Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const SizedBox(
+                  width: 60,
+                  height: 60,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 4,
+                    valueColor: AlwaysStoppedAnimation<Color>(kPrimaryColor),
+                  ),
                 ),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [ 
-                        const Icon(Icons.cloud_upload, color: kPrimaryColor),
-                        const SizedBox(width: 8),
-                        Text('Uploading video $_currentUploadIndex of ${_selectedVideos.length}...'),
-                        const Spacer(),
-                        Text('${(_uploadProgress * 100).toInt()}%'),
+                const SizedBox(height: 24),
+                Text(
+                  'Initializing...',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          )
+        : SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              children: [
+                // Header gradient section
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.8)],
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    child: Column(
+                      children: [
+                        // Category Display
+                        if (_effectiveCategory != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.white.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.category, color: Colors.white, size: 18),
+                                const SizedBox(width: 8),
+                                Text(
+                                  _effectiveCategory!,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    LinearProgressIndicator(
-                      value: _uploadProgress,
-                      backgroundColor: Colors.grey[200],
-                      valueColor: const AlwaysStoppedAnimation<Color>(kPrimaryColor),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-            ],
 
-            // Main Content
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    // Video Selection Buttons
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _buildVideoSourceButton(
-                              icon: Icons.videocam,
-                              label: 'Record Video',
-                              subtitle: 'Max 5 min',
-                              onTap: _recordVideo,
+                // Main content
+                Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Title Section
+                      _buildSectionCard(
+                        icon: Icons.title,
+                        title: 'Title & Description',
+                        child: Column(
+                          children: [
+                            // Title Input
+                             Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: TextField(
+                                controller: _titleController,
+                                maxLength: 100,
+                                decoration: InputDecoration(
+                                  labelText: 'Title *',
+                                  hintText: 'Give your video an engaging title',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.transparent,
+                                  counterText: '$_titleWordCount/20 words',
+                                  counterStyle: TextStyle(
+                                    color: _titleWordCount > 20 ? Colors.red : Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                  errorText: _titleWordCount > 20 ? 'Title exceeds word limit' : null,
+                                  prefixIcon: const Icon(Icons.edit, color: kPrimaryColor),
+                                ),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _buildVideoSourceButton(
-                              icon: Icons.video_library,
-                              label: 'Choose from Gallery',
-                              subtitle: 'Max 10 min',
-                              onTap: _pickVideoFromGallery,
+                            const SizedBox(height: 16),
+
+                            // Description Input
+                            Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.05),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: TextField(
+                                controller: _descriptionController,
+                                maxLines: 4,
+                                maxLength: 500,
+                                decoration: InputDecoration(
+                                  labelText: 'Description',
+                                  hintText: 'Tell viewers what your video is about...',
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  filled: true,
+                                  fillColor: Colors.transparent,
+                                  alignLabelWithHint: true,
+                                  counterText: '$_descriptionWordCount/100 words',
+                                  counterStyle: TextStyle(
+                                    color: _descriptionWordCount > 100 ? Colors.red : Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                  errorText: _descriptionWordCount > 100 ? 'Description exceeds word limit' : null,
+                                  prefixIcon: const Padding(
+                                    padding:  EdgeInsets.only(bottom: 60),
+                                    child: Icon(Icons.description, color: kPrimaryColor),
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
+                      const SizedBox(height: 20),
 
-                    const SizedBox(height: 16),
-
-                    // Storage Info Bar
-                    if (_selectedVideos.isNotEmpty) ...[
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              kPrimaryColor.withOpacity(0.1),
-                              kPrimaryColor.withOpacity(0.05),
+                      // Language Selection
+                      _buildSectionCard(
+                        icon: Icons.language,
+                        title: 'Language',
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.05),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2),
+                              ),
                             ],
                           ),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: kPrimaryColor.withOpacity(0.3)),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _buildInfoItem(
-                              icon: Icons.video_collection,
-                              value: '${_selectedVideos.length}/3',
-                              label: 'Videos',
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedLanguage,
+                            decoration: InputDecoration(
+                              labelText: 'Select Language',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide.none,
+                              ),
+                              filled: true,
+                              fillColor: Colors.transparent,
+                              prefixIcon: const Icon(Icons.translate, color: kPrimaryColor),
                             ),
-                            _buildInfoItem(
-                              icon: Icons.storage,
-                              value: _formatFileSize(_totalSize),
-                              label: 'Size',
-                            ),
-                            _buildInfoItem(
-                              icon: Icons.access_time,
-                              value: _formatDuration(_totalDuration),
-                              label: 'Duration',
-                            ),
-                          ],
+                            items: ['Telugu', 'Hindi', 'English', 'Tamil', 'Kannada']
+                                .map((language) => DropdownMenuItem(
+                                      value: language,
+                                      child: Text(language),
+                                    ))
+                                .toList(),
+                            onChanged: (value) {
+                              if (value != null) {
+                                setState(() {
+                                  _selectedLanguage = value;
+                                });
+                              }
+                            },
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                    ],
+                      const SizedBox(height: 20),
 
-                    // Selected Videos List
-                    if (_selectedVideos.isNotEmpty) ...[
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
-                              offset: const Offset(0, 2),
-                              blurRadius: 8,
-                            ),
-                          ],
-                        ),
+                      // Location Section
+                      _buildSectionCard(
+                        icon: Icons.location_on,
+                        title: 'Location',
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Padding(
+                            Container(
+                              width: double.infinity,  
                               padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: (_currentLatitude != null && _currentLongitude != null)
+                                    ? Colors.green.withOpacity(0.1)
+                                    : Colors.grey.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.video_collection, color: kPrimaryColor),
-                                  const SizedBox(width: 8),
-                                  const Text(
-                                    'Selected Videos',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                  Icon(
+                                    (_currentLatitude != null && _currentLongitude != null)
+                                        ? Icons.location_on
+                                        : Icons.location_off,
+                                    color: (_currentLatitude != null && _currentLongitude != null)
+                                        ? Colors.green
+                                        : Colors.grey[600],
                                   ),
-                                  const Spacer(),
-                                  Text(
-                                    '${_selectedVideos.length}/3',
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 14,
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      _locationStatus,
+                                      style: TextStyle(
+                                        color: (_currentLatitude != null && _currentLongitude != null)
+                                            ? Colors.green[700]
+                                            : Colors.grey[600],
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            ListView.separated(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: _selectedVideos.length,
-                              separatorBuilder: (context, index) => const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final video = _selectedVideos[index];
-                                final sizeInMB = _videoSizes[index] / (1024 * 1024);
-                                
-                                return ListTile(
-                                  leading: Container(
-                                    width: 50,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: kPrimaryColor.withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Icon(
-                                      Icons.play_arrow,
-                                      color: kPrimaryColor,
-                                    ),
-                                  ),
-                                  title: Text(
-                                    video.name,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  subtitle: Text(
-                                    _formatFileSize(sizeInMB),
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey,
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _isLoadingLocation ? null : _getCurrentLocation,
+                                    icon: _isLoadingLocation
+                                        ? const SizedBox(
+                                            width: 18,
+                                            height: 18,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.gps_fixed, size: 20),
+                                    label: Text(_isLoadingLocation ? 'Locating...' : 'Auto Detect'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: kPrimaryColor,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
                                     ),
                                   ),
-                                  trailing: IconButton(
-                                    onPressed: () => _removeVideo(index),
-                                    icon: const Icon(Icons.close, color: Colors.red),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _getLocationManually,
+                                    icon: const Icon(Icons.edit_location, size: 20),
+                                    label: const Text('Manual Entry'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: kPrimaryColor,
+                                      side: const BorderSide(color: kPrimaryColor),
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
                                   ),
-                                );
-                              },
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 20),
+
+                      // Video Selection Section
+                      _buildSectionCard(
+                        icon: Icons.video_library,
+                        title: 'Videos',
+                        subtitle: '${_selectedVideos.length}/3 selected',
+                        child: Column(
+                          children: [
+                            // Video selection buttons
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _selectedVideos.length >= 3 ? null : _recordVideo,
+                                    icon: const Icon(Icons.videocam, size: 20),
+                                    label: const Text('Record Video'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: kPrimaryColor,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: _selectedVideos.length >= 3 ? null : _pickVideoFromGallery,
+                                    icon: const Icon(Icons.photo_library, size: 20),
+                                    label: const Text('From Gallery'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: kPrimaryColor,
+                                      side: const BorderSide(color: kPrimaryColor),
+                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            // Selected videos list
+                            if (_selectedVideos.isNotEmpty) ...[
+                              const SizedBox(height: 20),
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: Colors.blue.withOpacity(0.05),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.blue.withOpacity(0.2)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.video_collection, color: Colors.blue[700]),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Selected Videos',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue[700],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ...List.generate(_selectedVideos.length, (index) {
+                                      final video = _selectedVideos[index];
+                                      final sizeInMB = _videoSizes[index] / (1024 * 1024);
+                                      return Container(
+                                        margin: const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(8),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(0.05),
+                                              blurRadius: 5,
+                                              offset: const Offset(0, 1),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                color: Colors.blue.withOpacity(0.1),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: const Icon(Icons.play_arrow, color: Colors.blue, size: 20),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    video.name,
+                                                    style: const TextStyle(
+                                                      fontWeight: FontWeight.w500,
+                                                      fontSize: 14,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    '${sizeInMB.toStringAsFixed(1)} MB',
+                                                    style: TextStyle(
+                                                      color: Colors.grey[600],
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            IconButton(
+                                              onPressed: () => _removeVideo(index),
+                                              icon: const Icon(Icons.close, color: Colors.red, size: 20),
+                                              style: IconButton.styleFrom(
+                                                backgroundColor: Colors.red.withOpacity(0.1),
+                                                padding: const EdgeInsets.all(6),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }),
+                                    const SizedBox(height: 12),
+                                    Container(
+                                      padding: const EdgeInsets.all(12),
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey[100],
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Icon(Icons.data_usage, size: 16, color: Colors.grey[600]),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'Total: ${_totalSize.toStringAsFixed(1)} MB',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey[700],
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          Row(
+                                            children: [
+                                              Icon(Icons.schedule, size: 16, color: Colors.grey[600]),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '~${_formatDuration(_totalDuration)}',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  color: Colors.grey[700],
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Upload Progress
+                      if (_isUploading) ...[
+                        _buildSectionCard(
+                          icon: Icons.cloud_upload,
+                          title: 'Upload Progress',
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [Colors.blue.withOpacity(0.1), Colors.blue.withOpacity(0.05)],
+                                  ),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'Video $_currentUploadIndex of ${_selectedVideos.length}',
+                                          style: const TextStyle(fontWeight: FontWeight.w500),
+                                        ),
+                                        Text(
+                                          '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.blue[700],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: LinearProgressIndicator(
+                                        value: _uploadProgress,
+                                        minHeight: 8,
+                                        backgroundColor: Colors.grey[300],
+                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                      ],
+
+                      // Submit Button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: ElevatedButton(
+                          onPressed: (_isProcessing || _isUploading || _selectedVideos.isEmpty)
+                              ? null
+                              : _processVideos,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kPrimaryColor,
+                            foregroundColor: Colors.white,
+                            disabledBackgroundColor: Colors.grey[300],
+                            elevation: _isProcessing || _isUploading ? 0 : 2,
+                            shadowColor: kPrimaryColor.withOpacity(0.3),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: _isProcessing
+                              ? const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      width: 24,
+                                      height: 24,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 3,
+                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                      ),
+                                    ),
+                                     SizedBox(width: 16),
+                                     Text('Processing Videos...', style: TextStyle(fontSize: 16)),
+                                  ],
+                                )
+                              : Text(
+                                  _isUploading
+                                      ? 'Uploading Videos...'
+                                      : _selectedVideos.isEmpty
+                                          ? 'Please Select Videos'
+                                          : 'Submit Videos',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Help Section
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.blue[50]!, Colors.indigo[50]!],
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.blue[200]!.withOpacity(0.5)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue[100],
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Icon(Icons.lightbulb_outline, color: Colors.blue[700], size: 20),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Quick Tips',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue[800],
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            _buildTipItem('📹', 'Maximum 3 videos per submission'),
+                            _buildTipItem('📦', 'Each video should be under 100MB'),
+                            _buildTipItem('⏱️', 'Recording: 5 min max, Gallery: 10 min max'),
+                            _buildTipItem('📍', 'Add location for better discoverability'),
+                            _buildTipItem('✏️', 'Use engaging titles and clear descriptions'),
+                          ],
+                        ),
+                      ),
                     ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+  );
+}
 
-                    // Title Input
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            offset: const Offset(0, 2),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.title, color: kPrimaryColor),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Title',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const Text(
-                                  ' *',
-                                  style: TextStyle(color: Colors.red),
-                                ),
-                                const Spacer(),
-                                Text(
-                                  '$_titleWordCount words',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              controller: _titleController,
-                              maxLines: 2,
-                              maxLength: 200,
-                              decoration: const InputDecoration(
-                                hintText: 'Enter a descriptive title for your video...',
-                                border: OutlineInputBorder(),
-                                counterText: '',
-                              ),
-                            ),
-                          ],
-                        ),
+Widget _buildSectionCard({
+  required IconData icon,
+  required String title,
+  String? subtitle,
+  required Widget child,
+}) {
+  return Container(
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.08),
+          blurRadius: 15,
+          offset: const Offset(0, 4),
+        ),
+      ],
+    ),
+    child: Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: kPrimaryColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: kPrimaryColor, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF2D3748),
                       ),
                     ),
-
-                    const SizedBox(height: 16),
-
-                    // Description Input
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.05),
-                            offset: const Offset(0, 2),
-                            blurRadius: 8,
-                          ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                const Icon(Icons.description, color: kPrimaryColor),
-                                const SizedBox(width: 8),
-                                const Text(
-                                  'Description',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const Spacer(),
-                                Text(
-                                  '$_descriptionWordCount words',
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            TextField(
-                              controller: _descriptionController,
-                              maxLines: 4,
-                              maxLength: 1000,
-                              decoration: const InputDecoration(
-                                hintText: 'Describe your video content, context, and any relevant details...',
-                                border: OutlineInputBorder(),
-                                counterText: '',
-                              ),
-                            ),
-                          ],
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                    ),
-
-                    const SizedBox(height: 100), // Space for bottom button
+                    ],
                   ],
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-
-      // Bottom Action Buttons
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              offset: const Offset(0, -2),
-              blurRadius: 8,
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              flex: 1,
-              child: OutlinedButton.icon(
-                onPressed: _isProcessing || _isUploading ? null : _saveDraft,
-                icon: const Icon(Icons.save),
-                label: const Text('Save Draft'),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  side: const BorderSide(color: kPrimaryColor),
-                  foregroundColor: kPrimaryColor,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: ElevatedButton.icon(
-                onPressed: _isProcessing || _isUploading ? null : _processVideos,
-                icon: _isProcessing
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : const Icon(Icons.cloud_upload),
-                label: Text(_isProcessing ? 'Processing...' : 'Submit'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  backgroundColor: kPrimaryColor,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: Colors.grey,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVideoSourceButton({
-    required IconData icon,
-    required String label,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: _isProcessing || _isUploading ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: kPrimaryColor.withOpacity(0.2)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              offset: const Offset(0, 2),
-              blurRadius: 8,
-            ),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: kPrimaryColor.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Icon(
-                icon,
-                color: kPrimaryColor,
-                size: 24,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInfoItem({
-    required IconData icon,
-    required String value,
-    required String label,
-  }) {
-    return Column(
-      children: [
-        Icon(icon, color: kPrimaryColor, size: 20),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: kPrimaryColor,
+            ],
           ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Colors.grey,
+          const SizedBox(height: 16),
+          child,
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _buildTipItem(String emoji, String text) {
+  return Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(emoji, style: const TextStyle(fontSize: 14)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.blue[800],
+              height: 1.4,
+            ),
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
+ }
 }

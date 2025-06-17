@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use, avoid_print
+// ignore_for_file: deprecated_member_use, avoid_print, unused_import
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';

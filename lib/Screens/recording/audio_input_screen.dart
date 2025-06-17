@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../constants.dart';
 import '../../services/api_service.dart';
 import '../../services/token_storage_service.dart';
+import '../../services/uuid_service.dart'; // Added missing import
 
 double cos(double radians) {
   return math.cos(radians);
@@ -23,12 +24,16 @@ double sin(double radians) {
 
 class AudioInputScreen extends StatefulWidget {
   final String? selectedCategory;
-  final String? selectedCategoryId; // Add this property
-  
+  final String? selectedCategoryId;
+  final String? categoryId;
+  final String? userId;
+
   const AudioInputScreen({
     Key? key,
     this.selectedCategory,
-    this.selectedCategoryId, // Add this parameter
+    this.selectedCategoryId,
+    this.categoryId,
+    this.userId,
   }) : super(key: key);
 
   @override
@@ -42,32 +47,44 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   bool _hasRecording = false;
   bool _isPlaying = false;
   bool _isUploading = false;
+  bool _isInitializing = false;
   bool _locationPermissionGranted = false;
   bool _locationEnabled = false;
-  
+
   Duration _recordingDuration = Duration.zero;
   Duration _playbackPosition = Duration.zero;
   Timer? _recordingTimer;
   Timer? _playbackTimer;
-  
+
   String _selectedLanguage = 'Telugu';
   double _audioLevel = 0.0;
-  
-  // FIXED: Use AudioRecorder instead of Record
+
+  // Audio components
   AudioRecorder? _audioRecorder;
   late AudioPlayer _audioPlayer;
-  
+
   // API related variables
   String? _currentRecordId;
   File? _audioFile;
   String? _userId;
   Position? _currentPosition;
-  
+
+  // Category management
+  String? _effectiveCategory;
+  String? _categoryId;
+  List<String> _availableCategories = [];
+
+  // Animation controllers
   late AnimationController _pulseController;
   late AnimationController _waveController;
   late Animation<double> _pulseAnimation;
 
-  // Add fallback categories map
+  // Location variables
+  double? _currentLatitude;
+  double? _currentLongitude;
+  String _locationStatus = 'Location not available';
+
+  // Fallback categories map
   static const Map<String, String> fallbackCategories = {
     'Fables': '379d6867-57c1-4f57-b6ee-fb734313e538',
     'Events': '7a184c41-1a49-4beb-a01a-d8dc01693b15',
@@ -89,33 +106,181 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   @override
   void initState() {
     super.initState();
+    _initializeData();
     _initializeAudio();
     _setupAnimations();
-    _initializeUser();
-    _initializeLocation();
+  }
+
+  // Initialize data with proper authentication and categories
+  Future<void> _initializeData() async {
+    setState(() {
+      _isInitializing = true;
+    });
+
+    try {
+      // Initialize UUID service
+      await UuidService.initialize();
+
+      // Get current user ID - try multiple methods
+      _userId = await _getCurrentUserId();
+      print('DEBUG: Retrieved user ID: $_userId');
+
+      // Get available categories
+      final categories = await UuidService.getCategories();
+      _availableCategories = categories.keys.toList();
+
+      // If no categories available, add a default one
+      if (_availableCategories.isEmpty) {
+        _availableCategories = ['General'];
+      }
+
+      // Determine effective category and ID
+      if (widget.selectedCategoryId != null &&
+          UuidService.isValidUuid(widget.selectedCategoryId!)) {
+        // Use provided category ID
+        _categoryId = widget.selectedCategoryId;
+        _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ??
+            widget.selectedCategory ??
+            'General';
+      } else if (widget.selectedCategory != null) {
+        // Use provided category name
+        _effectiveCategory = widget.selectedCategory!;
+        _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
+      } else {
+        // Use default category
+        _effectiveCategory = _availableCategories.isNotEmpty
+            ? _availableCategories[0]
+            : 'General';
+        _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
+      }
+
+      // Check if user is authenticated
+      if (_userId == null || _userId!.isEmpty) {
+        print('DEBUG: User ID is null or empty');
+        if (mounted) {
+          _showError('Please login to submit content');
+        }
+      } else {
+        print('DEBUG: User is authenticated with ID: $_userId');
+      }
+
+      // Get location in parallel
+      _initializeLocation();
+    } catch (e) {
+      print('Error initializing data: $e');
+      if (mounted) {
+        _showError('Error loading data: ${e.toString()}');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    }
+  }
+
+  // Enhanced user ID retrieval with multiple fallback methods
+  Future<String?> _getCurrentUserId() async {
+    try {
+      // Method 1: Try TokenStorageService first
+      String? userId = await TokenStorageService.getUserId();
+      if (userId != null && userId.isNotEmpty) {
+        return userId;
+      }
+
+      // Method 2: Try widget parameter
+      if (widget.userId != null && widget.userId!.isNotEmpty) {
+        return widget.userId;
+      }
+
+      // Method 3: Try to get from current user API call
+      try {
+        final userResult = await ApiService.getCurrentUser();
+        if (userResult['success'] == true && userResult['data'] != null) {
+          final userData = userResult['data'];
+          if (userData['id'] != null) {
+            return userData['id'].toString();
+          }
+        }
+      } catch (e) {
+        print('DEBUG: Failed to get user from API: $e');
+      }
+
+      return null;
+    } catch (e) {
+      print('DEBUG: Error in _getCurrentUserId: $e');
+      return null;
+    }
+  }
+
+  // Validate token before critical operations
+  Future<bool> _validateToken() async {
+    try {
+      // Check if token exists
+      final token = await TokenStorageService.getAuthToken();
+      if (token == null || token.isEmpty) {
+        print('DEBUG: No token found');
+        return false;
+      }
+
+      // Check token expiry
+      final isValid = await TokenStorageService.isTokenValid();
+      if (!isValid) {
+        print('DEBUG: Token expired');
+        return false;
+      }
+
+      // Test token with API call
+      try {
+        final testResult = await ApiService.getCurrentUser();
+        if (testResult['success']) {
+          print('DEBUG: Token validation passed');
+          return true;
+        } else {
+          print('DEBUG: Token validation failed: ${testResult['error']}');
+          return false;
+        }
+      } catch (e) {
+        print('DEBUG: Token test failed: $e');
+
+        // If it's a network error, we might still have a valid token
+        if (e.toString().contains('network') ||
+            e.toString().contains('connection')) {
+          print(
+              'DEBUG: Network error during token validation, assuming token is valid');
+          return true;
+        }
+
+        return false;
+      }
+    } catch (e) {
+      print('DEBUG: Token validation error: $e');
+      return false;
+    }
   }
 
   void _initializeAudio() async {
     try {
-      // FIXED: Initialize AudioRecorder properly
       _audioRecorder = AudioRecorder();
       _audioPlayer = AudioPlayer();
-      
+
       // Check if recording is supported
-      bool isSupported = await _audioRecorder!.isEncoderSupported(AudioEncoder.aacLc);
+      bool isSupported =
+          await _audioRecorder!.isEncoderSupported(AudioEncoder.aacLc);
       if (!isSupported) {
         print('Audio recording is not supported on this platform');
         _showError('Audio recording is not supported on this device');
         return;
       }
-      
+
       // Listen to player state changes
       _audioPlayer.onPlayerStateChanged.listen((PlayerState state) {
         if (mounted) {
           setState(() {
             _isPlaying = state == PlayerState.playing;
           });
-          
+
           if (state == PlayerState.completed) {
             _stopPlayback();
           }
@@ -160,28 +325,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     }
   }
 
-  Future<void> _initializeUser() async {
-    try {
-      // Get user ID from token storage or your auth system
-      final userData = await TokenStorageService.getUserData();
-      // ignore: unnecessary_null_comparison
-      if (userData != null && userData['id'] != null) {
-        _userId = userData['id'].toString();
-      } else {
-        // Fallback - you might want to redirect to login instead
-        _userId = 'anonymous_user';
-      }
-    } catch (e) {
-      print('Failed to get user data: $e');
-      _userId = 'anonymous_user';
-    }
-  }
-
   Future<void> _initializeLocation() async {
     try {
       // Check and request location permissions
       await _checkLocationPermissions();
-      
+
       // If permissions are granted, get current location
       if (_locationPermissionGranted && _locationEnabled) {
         await _getCurrentLocation();
@@ -206,7 +354,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
       // Check current permission status
       LocationPermission permission = await Geolocator.checkPermission();
-      
+
       if (permission == LocationPermission.denied) {
         // Request permission
         permission = await Geolocator.requestPermission();
@@ -214,8 +362,9 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
       // Update permission status
       setState(() {
-        _locationPermissionGranted = permission == LocationPermission.whileInUse || 
-                                   permission == LocationPermission.always;
+        _locationPermissionGranted =
+            permission == LocationPermission.whileInUse ||
+                permission == LocationPermission.always;
       });
 
       if (permission == LocationPermission.deniedForever) {
@@ -298,10 +447,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
       // Request location permission
       LocationPermission permission = await Geolocator.requestPermission();
-      
+
       setState(() {
-        _locationPermissionGranted = permission == LocationPermission.whileInUse || 
-                                   permission == LocationPermission.always;
+        _locationPermissionGranted =
+            permission == LocationPermission.whileInUse ||
+                permission == LocationPermission.always;
       });
 
       if (_locationPermissionGranted) {
@@ -333,7 +483,8 @@ class _AudioInputScreenState extends State<AudioInputScreen>
               SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
               ),
               SizedBox(width: 12),
               Text('Getting location...'),
@@ -349,13 +500,21 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         timeLimit: const Duration(seconds: 10),
       );
 
-      if (mounted) {
-        setState(() {});
-        print('Location obtained: ${_currentPosition?.latitude}, ${_currentPosition?.longitude}');
+      if (mounted && _currentPosition != null) {
+        setState(() {
+          _currentLatitude = _currentPosition!.latitude;
+          _currentLongitude = _currentPosition!.longitude;
+          _locationStatus = 'Location obtained';
+        });
+        print(
+            'Location obtained: ${_currentPosition?.latitude}, ${_currentPosition?.longitude}');
         _showSuccess('Location updated successfully');
       }
     } catch (e) {
       print('Failed to get location: $e');
+      setState(() {
+        _locationStatus = 'Location failed';
+      });
       _showError('Failed to get current location');
     }
   }
@@ -365,12 +524,12 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    
+
     _waveController = AnimationController(
       duration: const Duration(milliseconds: 2000),
       vsync: this,
     );
-    
+
     _pulseAnimation = Tween<double>(
       begin: 1.0,
       end: 1.2,
@@ -378,7 +537,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       parent: _pulseController,
       curve: Curves.easeInOut,
     ));
-    
+
     _pulseController.repeat(reverse: true);
   }
 
@@ -393,31 +552,79 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     super.dispose();
   }
 
+  // Enhanced permission handling method
   Future<bool> _requestPermissions() async {
     try {
-      // Request microphone permission
-      PermissionStatus microphoneStatus = await Permission.microphone.request();
-      
-      if (microphoneStatus != PermissionStatus.granted) {
-        _showError('Microphone permission is required for recording');
+      // Check current microphone permission status
+      PermissionStatus microphoneStatus = await Permission.microphone.status;
+
+      if (microphoneStatus.isDenied) {
+        // Request microphone permission
+        microphoneStatus = await Permission.microphone.request();
+      }
+
+      if (microphoneStatus.isPermanentlyDenied) {
+        // Show dialog to open app settings
+        _showPermissionDialog(
+          'Microphone Permission Required',
+          'Please enable microphone permission in app settings to record audio.',
+        );
         return false;
       }
 
-      // For Android, also request storage permission if needed
-      if (Platform.isAndroid) {
-        PermissionStatus storageStatus = await Permission.storage.request();
-        if (storageStatus != PermissionStatus.granted) {
-          // Try with manage external storage for Android 11+
-          await Permission.manageExternalStorage.request();
+      if (microphoneStatus.isGranted) {
+        // For Android, also check storage permission
+        if (Platform.isAndroid) {
+          PermissionStatus storageStatus = await Permission.storage.status;
+
+          if (storageStatus.isDenied) {
+            storageStatus = await Permission.storage.request();
+          }
+
+          // For Android 11+ (API 30+), may need MANAGE_EXTERNAL_STORAGE
+          if (storageStatus.isPermanentlyDenied) {
+            await Permission.manageExternalStorage.request();
+          }
         }
+        return true;
       }
 
-      return true;
+      _showError('Microphone permission is required for recording');
+      return false;
     } catch (e) {
       print('Error requesting permissions: $e');
       _showError('Failed to request permissions: $e');
       return false;
     }
+  }
+
+// Enhanced permission dialog
+  void _showPermissionDialog(String title, String message) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _startRecording() async {
@@ -451,7 +658,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       final filePath = '${directory.path}/$fileName';
       _audioFile = File(filePath);
 
-      // FIXED: Start recording with proper configuration
+      // Start recording with proper configuration
       await _audioRecorder!.start(
         const RecordConfig(
           encoder: AudioEncoder.aacLc,
@@ -469,9 +676,9 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         _hasRecording = false;
         _currentRecordId = null;
       });
-      
+
       _waveController.repeat();
-      
+
       // Start recording timer
       _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
@@ -482,7 +689,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
           });
         }
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Recording started...'),
@@ -499,14 +706,14 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   Future<void> _pauseRecording() async {
     try {
       if (_audioRecorder == null) return;
-      
+
       await _audioRecorder!.pause();
       setState(() {
         _isPaused = true;
       });
       _recordingTimer?.cancel();
       _waveController.stop();
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Recording paused'),
@@ -523,23 +730,24 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   Future<void> _resumeRecording() async {
     try {
       if (_audioRecorder == null) return;
-      
+
       await _audioRecorder!.resume();
       setState(() {
         _isPaused = false;
       });
-      
+
       _waveController.repeat();
-      
+
       _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (mounted) {
           setState(() {
-            _recordingDuration = _recordingDuration + const Duration(seconds: 1);
+            _recordingDuration =
+                _recordingDuration + const Duration(seconds: 1);
             _audioLevel = (timer.tick % 3) * 0.3 + 0.2;
           });
         }
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Recording resumed'),
@@ -556,24 +764,24 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   Future<void> _stopRecording() async {
     try {
       if (_audioRecorder == null) return;
-      
+
       final path = await _audioRecorder!.stop();
-      
+
       setState(() {
         _isRecording = false;
         _isPaused = false;
         _hasRecording = true;
         _audioLevel = 0.0;
       });
-      
+
       _recordingTimer?.cancel();
       _waveController.stop();
-      
+
       if (path != null) {
         _audioFile = File(path);
         print('Recording saved to: $path');
       }
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Recording stopped'),
@@ -589,15 +797,15 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
   Future<void> _playRecording() async {
     if (!_hasRecording || _audioFile == null) return;
-    
+
     try {
       await _audioPlayer.play(DeviceFileSource(_audioFile!.path));
-      
+
       setState(() {
         _isPlaying = true;
         _playbackPosition = Duration.zero;
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Playing recording...'),
@@ -629,7 +837,8 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Delete Recording'),
-          content: const Text('Are you sure you want to delete this recording?'),
+          content:
+              const Text('Are you sure you want to delete this recording?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -646,12 +855,12 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                   _currentRecordId = null;
                 });
                 _playbackTimer?.cancel();
-                
+
                 // Delete local file
                 if (_audioFile != null && _audioFile!.existsSync()) {
                   _audioFile!.deleteSync();
                 }
-                
+
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Recording deleted'),
@@ -692,14 +901,16 @@ class _AudioInputScreenState extends State<AudioInputScreen>
             children: [
               Text('Duration: ${_formatDuration(_recordingDuration)}'),
               Text('Language: $_selectedLanguage'),
-              if (widget.selectedCategory != null)
-                Text('Category: ${widget.selectedCategory}'),
+              if (_effectiveCategory != null)
+                Text('Category: $_effectiveCategory'),
               if (_currentPosition != null)
-                Text('Location: ${_currentPosition!.latitude.toStringAsFixed(6)}, ${_currentPosition!.longitude.toStringAsFixed(6)}')
+                Text(
+                    'Location: ${_currentPosition!.latitude.toStringAsFixed(6)}, ${_currentPosition!.longitude.toStringAsFixed(6)}')
               else
                 const Text('Location: Not available'),
               const SizedBox(height: 16),
-              const Text('This will create a record and upload your audio. Continue?'),
+              const Text(
+                  'This will create a record and upload your audio. Continue?'),
             ],
           ),
           actions: [
@@ -726,18 +937,23 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
   // Helper method to get category ID
   String _getCategoryId() {
-    // If selectedCategoryId is provided, use it
-    if (widget.selectedCategoryId != null) {
-      return widget.selectedCategoryId!;
+    // First try to use the determined categoryId from initialization
+    if (_categoryId != null && _categoryId!.isNotEmpty) {
+      return _categoryId!;
     }
-    
-    // If selectedCategory is provided, try to find matching ID
+
+    // Fallback to provided categoryId
+    if (widget.categoryId != null && widget.categoryId!.isNotEmpty) {
+      return widget.categoryId!;
+    }
+
+    // If no categoryId, try to get it from selectedCategory name
     if (widget.selectedCategory != null) {
-      return fallbackCategories[widget.selectedCategory] ?? 
-             fallbackCategories['Music']!; // Default to Music
+      final categoryId = fallbackCategories[widget.selectedCategory!];
+      if (categoryId != null) return categoryId;
     }
-    
-    // Default fallback
+
+    // Default fallback to Music category
     return fallbackCategories['Music']!;
   }
 
@@ -747,89 +963,126 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     });
 
     try {
+      // Step 1: Validate preconditions
       if (_audioFile == null || !_audioFile!.existsSync()) {
         throw Exception('Audio file not found');
       }
 
-      // FIXED: Get current user ID from TokenStorageService instead of UuidService
-      if (_userId == null) {
+      if (_userId == null || _userId!.isEmpty) {
         throw Exception('User not authenticated');
       }
 
-      // Get file info
+      // Step 2: Validate token
+      bool isTokenValid = await _validateToken();
+      if (!isTokenValid) {
+        throw Exception('Authentication expired. Please login again.');
+      }
+
+      // Step 3: Prepare file information
       final fileSize = await _audioFile!.length();
       final fileName = _audioFile!.path.split('/').last;
       final categoryId = _getCategoryId();
 
-      // Step 1: Create record with all required information
+      print('DEBUG: Starting submit process');
+      print('DEBUG: User ID: $_userId');
+      print('DEBUG: Category ID: $categoryId');
+      print('DEBUG: File size: $fileSize bytes');
+
+      // Step 4: Create record
       final createResult = await ApiService.createRecord(
         title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}',
-        description: 'Audio recording in $_selectedLanguage language (${_formatDuration(_recordingDuration)})',
+        description:
+            'Audio recording in $_selectedLanguage language (${_formatDuration(_recordingDuration)})',
         categoryId: categoryId,
         userId: _userId!,
         mediaType: 'audio',
-        latitude: _currentPosition?.latitude,
-        longitude: _currentPosition?.longitude,
+        latitude: _currentLatitude,
+        longitude: _currentLongitude,
         fileName: fileName,
         fileSize: fileSize,
       );
+
+      print('DEBUG: Create record result: $createResult');
 
       if (!createResult['success']) {
         throw Exception(createResult['error'] ?? 'Failed to create record');
       }
 
+      // Step 5: Extract record ID (handle different response formats)
       final recordData = createResult['data'];
-      _currentRecordId = recordData['uid']?.toString(); // NOTE: API returns 'uid', not 'id'
+      _currentRecordId = _extractRecordId(recordData);
 
       if (_currentRecordId == null) {
         throw Exception('No record ID returned from server');
       }
 
-      // Step 2: Upload audio file with ALL required parameters
+      print('DEBUG: Created record with ID: $_currentRecordId');
+
+      // Step 6: Upload file
       final uploadResult = await ApiService.uploadRecord(
         recordId: _currentRecordId!,
         file: _audioFile!,
-        title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}', // REQUIRED
-        categoryId: categoryId, // REQUIRED
-        userId: _userId!, // REQUIRED
-        mediaType: 'audio', // REQUIRED
-        description: 'Audio recording in $_selectedLanguage (${_formatDuration(_recordingDuration)})',
+        title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}',
+        categoryId: categoryId,
+        userId: _userId!,
+        mediaType: 'audio',
+        description:
+            'Audio recording in $_selectedLanguage (${_formatDuration(_recordingDuration)})',
       );
+
+      print('DEBUG: Upload result: $uploadResult');
 
       if (!uploadResult['success']) {
         throw Exception(uploadResult['error'] ?? 'Failed to upload audio file');
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Recording submitted successfully! (${_formatDuration(_recordingDuration)})',
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      // Step 7: Success handling
+      _showSuccess(
+          'Recording submitted successfully! (${_formatDuration(_recordingDuration)})');
 
-      // Navigate back to previous screen
+      // Navigate back with success data
       Navigator.pop(context, {
         'success': true,
         'recordId': _currentRecordId,
         'duration': _recordingDuration.inSeconds,
+        'category': _effectiveCategory,
       });
     } catch (e) {
       print('Submit error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to submit recording: $e'),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      String errorMessage = e.toString();
+
+      // Handle specific error types
+      if (errorMessage.contains('Authentication')) {
+        errorMessage = 'Please login again to submit recordings';
+      } else if (errorMessage.contains('network') ||
+          errorMessage.contains('connection')) {
+        errorMessage =
+            'Network error. Please check your connection and try again';
+      } else if (errorMessage.contains('file')) {
+        errorMessage = 'Audio file error. Please record again';
+      }
+
+      _showError('Failed to submit recording: $errorMessage');
     } finally {
       setState(() {
         _isUploading = false;
       });
     }
+  }
+
+  String? _extractRecordId(dynamic recordData) {
+    if (recordData == null) return null;
+
+    // Try different possible field names
+    final possibleFields = ['uid', 'id', 'recordId', 'record_id'];
+
+    for (String field in possibleFields) {
+      if (recordData[field] != null) {
+        return recordData[field].toString();
+      }
+    }
+
+    return null;
   }
 
   String _formatDuration(Duration duration) {
@@ -925,10 +1178,10 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         child: SingleChildScrollView(
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              minHeight: MediaQuery.of(context).size.height - 
-                        MediaQuery.of(context).padding.top - 
-                        kToolbarHeight - 
-                        MediaQuery.of(context).padding.bottom,
+              minHeight: MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.top -
+                  kToolbarHeight -
+                  MediaQuery.of(context).padding.bottom,
             ),
             child: IntrinsicHeight(
               child: Column(
@@ -979,7 +1232,8 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            const Icon(Icons.language, size: 16, color: Colors.grey),
+                            const Icon(Icons.language,
+                                size: 16, color: Colors.grey),
                             const SizedBox(width: 8),
                             Text(
                               'Language: $_selectedLanguage',
@@ -1037,7 +1291,9 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                             ),
                             child: Text(
                               _formatDuration(
-                                _isPlaying ? _playbackPosition : _recordingDuration,
+                                _isPlaying
+                                    ? _playbackPosition
+                                    : _recordingDuration,
                               ),
                               style: const TextStyle(
                                 fontSize: 32,
@@ -1057,8 +1313,12 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                               // Play/Pause Button (only show if has recording)
                               if (_hasRecording)
                                 _buildControlButton(
-                                  onPressed: _isPlaying ? _stopPlayback : _playRecording,
-                                  icon: _isPlaying ? Icons.stop : Icons.play_arrow,
+                                  onPressed: _isPlaying
+                                      ? _stopPlayback
+                                      : _playRecording,
+                                  icon: _isPlaying
+                                      ? Icons.stop
+                                      : Icons.play_arrow,
                                   color: Colors.purple,
                                   size: 60,
                                 ),
@@ -1085,8 +1345,12 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 _buildControlButton(
-                                  onPressed: _isPaused ? _resumeRecording : _pauseRecording,
-                                  icon: _isPaused ? Icons.play_arrow : Icons.pause,
+                                  onPressed: _isPaused
+                                      ? _resumeRecording
+                                      : _pauseRecording,
+                                  icon: _isPaused
+                                      ? Icons.play_arrow
+                                      : Icons.pause,
                                   color: Colors.orange,
                                   size: 50,
                                 ),
@@ -1131,7 +1395,8 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                                     width: 20,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
                                     ),
                                   ),
                                   SizedBox(width: 12),
@@ -1292,9 +1557,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 32),
                 child: LinearProgressIndicator(
-                  value: _playbackPosition.inSeconds / _recordingDuration.inSeconds,
+                  value: _playbackPosition.inSeconds /
+                      _recordingDuration.inSeconds,
                   backgroundColor: Colors.grey.withOpacity(0.2),
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.purple),
+                  valueColor:
+                      const AlwaysStoppedAnimation<Color>(Colors.purple),
                 ),
               ),
             ],
@@ -1417,6 +1684,6 @@ class AudioWavePainter extends CustomPainter {
   @override
   bool shouldRepaint(AudioWavePainter oldDelegate) {
     return oldDelegate.animationValue != animationValue ||
-           oldDelegate.audioLevel != audioLevel;
+        oldDelegate.audioLevel != audioLevel;
   }
 }

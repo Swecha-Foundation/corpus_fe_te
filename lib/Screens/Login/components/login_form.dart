@@ -646,7 +646,7 @@ class _LoginFormState extends State<LoginForm> {
           
           // Don't have account section
           AlreadyHaveAnAccountCheck(
-            login: true,
+            isLoginScreen: true,
             press: () {
               if (!_isLoading && mounted) {
                 Navigator.pushReplacement(

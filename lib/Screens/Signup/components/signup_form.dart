@@ -756,6 +756,7 @@ class _SignUpFormState extends State<SignUpForm> {
             
             // Already have account check
             AlreadyHaveAnAccountCheck(
+              isLoginScreen: false,
               press: () {
                 Navigator.pushReplacement(
                   context,

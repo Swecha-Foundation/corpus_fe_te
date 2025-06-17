@@ -58,6 +58,7 @@ class ApiService {
     required String description,
     required String userId,
     required String mediaType,
+    
     double? latitude,
     double? longitude,
     String? fileName,

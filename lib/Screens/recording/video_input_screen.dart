@@ -14,7 +14,7 @@ class VideoInputScreen extends StatefulWidget {
   final String? categoryId;
   final String? selectedCategoryId;
   final String? userId;
-  
+
   const VideoInputScreen({
     Key? key,
     this.selectedCategory,
@@ -102,37 +102,40 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     try {
       // Initialize UUID service
       await UuidService.initialize();
-      
+
       // Get current user ID - try multiple methods
       _userId = await _getCurrentUserId();
       print('DEBUG: Retrieved user ID: $_userId');
-      
+
       // Get available categories
       final categories = await UuidService.getCategories();
       _availableCategories = categories.keys.toList();
-      
+
       // If no categories available, add a default one
       if (_availableCategories.isEmpty) {
         _availableCategories = ['General'];
       }
-      
+
       // Determine effective category and ID
-      if (widget.selectedCategoryId != null && UuidService.isValidUuid(widget.selectedCategoryId!)) {
+      if (widget.selectedCategoryId != null &&
+          UuidService.isValidUuid(widget.selectedCategoryId!)) {
         // Use provided category ID
         _categoryId = widget.selectedCategoryId;
-        _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ?? 
-                            widget.selectedCategory ?? 'General';
+        _effectiveCategory = await UuidService.getCategoryName(_categoryId!) ??
+            widget.selectedCategory ??
+            'General';
       } else if (widget.selectedCategory != null) {
         // Use provided category name
         _effectiveCategory = widget.selectedCategory!;
         _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
       } else {
         // Use default category
-        _effectiveCategory = _availableCategories.isNotEmpty ? 
-                            _availableCategories[0] : 'General';
+        _effectiveCategory = _availableCategories.isNotEmpty
+            ? _availableCategories[0]
+            : 'General';
         _categoryId = await UuidService.getCategoryUuid(_effectiveCategory);
       }
-      
+
       // Check if user is authenticated
       if (_userId == null || _userId!.isEmpty) {
         print('DEBUG: User ID is null or empty');
@@ -145,7 +148,6 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
 
       // Get location in parallel
       _getCurrentLocation();
-
     } catch (e) {
       print('Error initializing data: $e');
       if (mounted) {
@@ -235,18 +237,18 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     if (_categoryId != null && _categoryId!.isNotEmpty) {
       return _categoryId!;
     }
-    
+
     // Fallback to provided categoryId
     if (widget.categoryId != null && widget.categoryId!.isNotEmpty) {
       return widget.categoryId!;
     }
-    
+
     // If no categoryId, try to get it from selectedCategory name
     if (widget.selectedCategory != null) {
       final categoryId = _fallbackCategories[widget.selectedCategory!];
       if (categoryId != null) return categoryId;
     }
-    
+
     // Default fallback to Music category
     return '94979e9f-4895-4cd7-8601-ad53d8099bf4';
   }
@@ -254,7 +256,8 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
   void _updateDescriptionWordCount() {
     final text = _descriptionController.text.trim();
     setState(() {
-      _descriptionWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
+      _descriptionWordCount =
+          text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
     });
   }
 
@@ -316,7 +319,8 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       setState(() {
         _currentLatitude = position.latitude;
         _currentLongitude = position.longitude;
-        _locationStatus = 'Location: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
+        _locationStatus =
+            'Location: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}';
         _isLoadingLocation = false;
       });
 
@@ -421,7 +425,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
         source: ImageSource.camera,
         maxDuration: const Duration(minutes: 5), // 5 minute limit
       );
-      
+
       if (video != null) {
         await _addVideoToList(video);
         _showSnackBar('Video recorded successfully!', Colors.green);
@@ -437,7 +441,7 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
         source: ImageSource.gallery,
         maxDuration: const Duration(minutes: 10), // 10 minute limit for gallery
       );
-      
+
       if (video != null) {
         await _addVideoToList(video);
         _showSnackBar('Video selected successfully!', Colors.green);
@@ -481,20 +485,21 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     try {
       final sizeInBytes = _videoSizes[index];
       final sizeInMB = sizeInBytes / (1024 * 1024);
-      
+
       setState(() {
         _selectedVideos.removeAt(index);
         _videoSizes.removeAt(index);
         _totalSize -= sizeInMB;
         _totalDuration -= 30; // Placeholder
       });
-      
+
       _showSnackBar('Video removed', Colors.grey);
     } catch (e) {
       _showSnackBar('Error removing video: $e', Colors.red);
     }
   }
 
+  // FIXED: Process videos with proper validation and API calls
   Future<void> _processVideos() async {
     if (_selectedVideos.isEmpty) {
       _showSnackBar('Please select at least one video', Colors.orange);
@@ -506,20 +511,18 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       return;
     }
 
-    // Validate authentication before processing
+    // Validate user authentication
     if (_userId == null || _userId!.isEmpty) {
-      _showSnackBar('Please login to submit content', Colors.red);
+      _showSnackBar('Please login to submit content', Colors.orange);
       return;
     }
 
-    // Validate token
-    final isTokenValid = await _validateToken();
-    if (!isTokenValid) {
-      _showSnackBar('Session expired. Please login again', Colors.red);
+    // Validate category ID
+    final categoryId = _getCategoryId();
+    if (categoryId.isEmpty) {
+      _showSnackBar('Category is required', Colors.orange);
       return;
     }
-
-    final categoryId = _getCategoryId(); // Use helper method
 
     setState(() {
       _isProcessing = true;
@@ -527,15 +530,16 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
 
     try {
       // Calculate total file size for the largest video (as representative)
-      final largestVideoIndex = _videoSizes.indexOf(_videoSizes.reduce((a, b) => a > b ? a : b));
+      final largestVideoIndex =
+          _videoSizes.indexOf(_videoSizes.reduce((a, b) => a > b ? a : b));
       final largestVideoSize = _videoSizes[largestVideoIndex];
 
-      // First create the record
+      // Create the record using the createRecord method with proper parameters
       final recordResult = await ApiService.createRecord(
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
-        categoryId: categoryId,
-        userId: _userId!,
+        categoryId: categoryId, // Use the validated category ID
+        userId: _userId!, // Use the validated user ID
         mediaType: 'video',
         latitude: _currentLatitude,
         longitude: _currentLongitude,
@@ -543,22 +547,101 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
         fileSize: largestVideoSize,
       );
 
+      print('Create record result: $recordResult'); // Debug log
+
       if (recordResult['success']) {
         final recordData = recordResult['data'];
+        print('Full record response: $recordData'); // Debug log
+
+        // Log the full response for debugging
+        print('Full record response data structure: $recordData'); // Debug log
+
+        // Extract record ID - try all possible field names
+        String? extractedId;
+
+        // First try common ID field names
+        final possibleIdFields = [
+          'uid',
+          'id',
+          'record_id',
+          '_id',
+          'recordId',
+          'uuid',
+          'record_uid',
+          'recordUid',
+          'recordUUID',
+          'record_uuid'
+        ];
+
+        // Try each possible field name
+        for (final field in possibleIdFields) {
+          if (recordData[field] != null) {
+            extractedId = recordData[field].toString();
+            print('Found ID in field: $field = $extractedId'); // Debug log
+            break;
+          }
+        }
+
+        // If still not found, try to find any field that might contain an ID
+        if (extractedId == null) {
+          recordData.forEach((key, value) {
+            if ((key.toLowerCase().contains('id') ||
+                    key.toLowerCase().contains('uid')) &&
+                value != null &&
+                value.toString().isNotEmpty) {
+              extractedId = value.toString();
+              print(
+                  'Found potential ID in field: $key = $extractedId'); // Debug log
+            }
+          });
+        }
+
+        // Update state with the found ID
         setState(() {
-          _createdRecordId = recordData['id']?.toString() ?? recordData['record_id']?.toString();
+          _createdRecordId = extractedId;
         });
-        
-        if (_createdRecordId != null) {
+
+        print('Extracted record ID: $_createdRecordId'); // Debug log
+
+        if (_createdRecordId != null && _createdRecordId!.isNotEmpty) {
           _showSubmitDialog();
         } else {
-          _showSnackBar('Error: Could not get record ID from response', Colors.red);
+          // If no ID found, provide detailed error with available fields
+          final availableKeys = recordData.keys.join(', ');
+          print('Available keys in response: $availableKeys'); // Debug log
+
+          // Try to extract the record directly from the response if it's nested
+          if (recordData['record'] != null && recordData['record'] is Map) {
+            final nestedRecord = recordData['record'] as Map;
+            print('Found nested record field, keys: ${nestedRecord.keys}');
+
+            // Try to get ID from nested record
+            for (final field in possibleIdFields) {
+              if (nestedRecord[field] != null) {
+                final nestedId = nestedRecord[field].toString();
+                print('Found ID in nested record field: $field = $nestedId');
+                setState(() {
+                  _createdRecordId = nestedId;
+                });
+                _showSubmitDialog();
+                return;
+              }
+            }
+          }
+
+          _showSnackBar(
+              'Error: Could not get record ID from response. Available fields: $availableKeys',
+              Colors.red);
         }
       } else {
-        _showSnackBar('Error creating record: ${recordResult['message'] ?? recordResult['error']}', Colors.red);
+        _showSnackBar(
+            'Error creating record: ${recordResult['message'] ?? recordResult['error']}',
+            Colors.red);
+        print('Create record failed: $recordResult'); // Debug log
       }
     } catch (e) {
       _showSnackBar('Error: $e', Colors.red);
+      print('Process videos error: $e'); // Debug log
     } finally {
       setState(() {
         _isProcessing = false;
@@ -586,9 +669,11 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
               if (_effectiveCategory != null)
                 Text('Category: $_effectiveCategory'),
               if (_currentLatitude != null && _currentLongitude != null)
-                Text('Location: ${_currentLatitude!.toStringAsFixed(4)}, ${_currentLongitude!.toStringAsFixed(4)}'),
+                Text(
+                    'Location: ${_currentLatitude!.toStringAsFixed(4)}, ${_currentLongitude!.toStringAsFixed(4)}'),
               const SizedBox(height: 16),
-              const Text('Record created successfully! Ready to upload videos?'),
+              const Text(
+                  'Record created successfully! Ready to upload videos?'),
             ],
           ),
           actions: [
@@ -613,13 +698,29 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     );
   }
 
+  // FIXED: Upload videos with correct API method signature
+  // FIXED: Upload videos with correct user ID handling
   Future<void> _uploadVideos() async {
+    // Enhanced check for record ID
     if (_createdRecordId == null || _createdRecordId!.isEmpty) {
-      _showSnackBar('No record ID found', Colors.red);
-      return;
+      print('ERROR: No record ID available for upload');
+
+      // Try to recreate the record if missing
+      _showSnackBar(
+          'Record ID missing. Attempting to recreate record...', Colors.orange);
+
+      // Attempt to recreate the record
+      await _processVideos();
+
+      // Check again after recreation attempt
+      if (_createdRecordId == null || _createdRecordId!.isEmpty) {
+        _showSnackBar(
+            'Failed to create record ID. Cannot upload videos.', Colors.red);
+        return;
+      }
     }
 
-    // Final authentication check
+    // Final authentication check - USE _userId instead of widget.userId
     if (_userId == null || _userId!.isEmpty) {
       _showSnackBar('Authentication required', Colors.red);
       return;
@@ -634,7 +735,6 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     try {
       int successfulUploads = 0;
       List<String> failedUploads = [];
-      final categoryId = _getCategoryId();
 
       for (int i = 0; i < _selectedVideos.length; i++) {
         setState(() {
@@ -651,29 +751,47 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           continue;
         }
 
+        // FIXED: Use _userId instead of widget.userId
+        if (_userId == null || _userId!.isEmpty) {
+          failedUploads.add('Video ${i + 1}: User ID is required');
+          continue;
+        }
+
         try {
+          // FIXED: Use correct uploadRecord method signature with all required parameters
           final uploadResult = await ApiService.uploadRecord(
             recordId: _createdRecordId!,
             file: file,
-            title: 'Video Upload - ${DateTime.now().toString().split('.')[0]}',
-            categoryId: categoryId,
-            userId: _userId!,
+            title: _titleController.text.trim(),
+            categoryId:
+                _getCategoryId(), // Use the helper method to get category ID
+            userId: _userId!, // Use the authenticated user ID
             mediaType: 'video',
-            description: '${_descriptionController.text.trim()} - Video ${i + 1}',
+            description:
+                '${_descriptionController.text.trim()} - Video ${i + 1}',
           );
+
+          print('Upload result for video ${i + 1}: $uploadResult'); // Debug log
 
           if (uploadResult['success']) {
             successfulUploads++;
             _showSnackBar('Video ${i + 1} uploaded successfully', Colors.green);
           } else {
-            final errorMessage = uploadResult['message'] ?? uploadResult['error'] ?? 'Unknown error';
+            final errorMessage = uploadResult['message'] ??
+                uploadResult['error'] ??
+                'Unknown error';
             failedUploads.add('Video ${i + 1}: $errorMessage');
-            _showSnackBar('Failed to upload video ${i + 1}: $errorMessage', Colors.red);
+            _showSnackBar(
+                'Failed to upload video ${i + 1}: $errorMessage', Colors.red);
           }
         } catch (e) {
           failedUploads.add('Video ${i + 1}: $e');
           _showSnackBar('Error uploading video ${i + 1}: $e', Colors.red);
+          print('Upload error for video ${i + 1}: $e'); // Debug log
         }
+
+        // Small delay between uploads to prevent overwhelming the server
+        await Future.delayed(const Duration(milliseconds: 500));
       }
 
       setState(() {
@@ -690,11 +808,33 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
       }
     } catch (e) {
       _showSnackBar('Upload error: $e', Colors.red);
+      print('General upload error: $e'); // Debug log
     } finally {
       setState(() {
         _isUploading = false;
         _currentUploadIndex = 0;
       });
+    }
+  }
+
+  // Helper method to get uploaded records (for verification)
+  Future<void> _getUploadedRecords() async {
+    try {
+      final result = await ApiService.getUserRecords(
+        mediaType: 'video',
+        limit: 10,
+      );
+
+      if (result['success']) {
+        print('User records: ${result['data']}'); // Debug log
+        _showSnackBar('Records retrieved successfully', Colors.green);
+      } else {
+        print('Failed to get records: ${result['error']}');
+        _showSnackBar('Failed to get records: ${result['error']}', Colors.red);
+      }
+    } catch (e) {
+      print('Error getting records: $e');
+      _showSnackBar('Error getting records: $e', Colors.red);
     }
   }
 
@@ -714,12 +854,20 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('All ${_selectedVideos.length} videos have been uploaded successfully!'),
+              Text(
+                  'All ${_selectedVideos.length} videos have been uploaded successfully!'),
               const SizedBox(height: 16),
               Text('Record ID: $_createdRecordId'),
             ],
           ),
           actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _getUploadedRecords(); // Optional: Show uploaded records
+              },
+              child: const Text('View Records'),
+            ),
             ElevatedButton(
               onPressed: () {
                 Navigator.pop(context);
@@ -754,12 +902,18 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('$successCount of ${_selectedVideos.length} videos uploaded successfully.'),
+              Text(
+                  '$successCount of ${_selectedVideos.length} videos uploaded successfully.'),
               const SizedBox(height: 12),
               if (failures.isNotEmpty) ...[
-                const Text('Failed uploads:', style: TextStyle(fontWeight: FontWeight.bold)),
+                const Text('Failed uploads:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
-                ...failures.map((failure) => Text('• $failure', style: const TextStyle(fontSize: 12))),
+                ...failures.take(3).map((failure) =>
+                    Text('• $failure', style: const TextStyle(fontSize: 12))),
+                if (failures.length > 3)
+                  Text('... and ${failures.length - 3} more',
+                      style: const TextStyle(fontSize: 12)),
               ],
               const SizedBox(height: 16),
               Text('Record ID: $_createdRecordId'),
@@ -767,7 +921,10 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                Navigator.pop(context);
+                // Retry only failed uploads (implement if needed)
+              },
               child: const Text('Retry Failed'),
             ),
             ElevatedButton(
@@ -806,14 +963,20 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
             children: [
               const Text('All video uploads failed:'),
               const SizedBox(height: 12),
-              ...failures.take(3).map((failure) => Text('• $failure', style: const TextStyle(fontSize: 12))),
+              ...failures.take(3).map((failure) =>
+                  Text('• $failure', style: const TextStyle(fontSize: 12))),
               if (failures.length > 3)
-                Text('... and ${failures.length - 3} more', style: const TextStyle(fontSize: 12)),
+                Text('... and ${failures.length - 3} more',
+                    style: const TextStyle(fontSize: 12)),
             ],
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                Navigator.pop(context);
+                // Retry all uploads
+                _uploadVideos();
+              },
               child: const Text('Retry'),
             ),
             ElevatedButton(
@@ -847,9 +1010,11 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        final latController = TextEditingController(text: _currentLatitude?.toString() ?? '');
-        final lngController = TextEditingController(text: _currentLongitude?.toString() ?? '');
-        
+        final latController =
+            TextEditingController(text: _currentLatitude?.toString() ?? '');
+        final lngController =
+            TextEditingController(text: _currentLongitude?.toString() ?? '');
+
         return AlertDialog(
           title: const Text('Add Location'),
           content: Column(
@@ -898,7 +1063,8 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
                   setState(() {
                     _currentLatitude = lat;
                     _currentLongitude = lng;
-                    _locationStatus = 'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
+                    _locationStatus =
+                        'Location: ${lat.toStringAsFixed(4)}, ${lng.toStringAsFixed(4)}';
                   });
                   Navigator.pop(context);
                   _showSnackBar('Location set manually', Colors.green);
@@ -934,758 +1100,858 @@ class _VideoInputScreenState extends State<VideoInputScreen> {
 
   @override
   Widget build(BuildContext context) {
-  return Scaffold(
-    backgroundColor: Colors.grey[50],
-    appBar: AppBar(
-      title: const Text('Create Video Content'),
-      backgroundColor: kPrimaryColor,
-      foregroundColor: Colors.white,
-      elevation: 0,
-      actions: [
-        if (!_isProcessing && !_isUploading)
-          Container(
-            margin: const EdgeInsets.only(right: 8),
-            child: TextButton.icon(
-              onPressed: _saveDraft,
-              icon: const Icon(Icons.save_outlined, color: Colors.white, size: 20),
-              label: const Text('Save Draft', style: TextStyle(color: Colors.white)),
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.2),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text('Create Video Content'),
+        backgroundColor: kPrimaryColor,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        actions: [
+          if (!_isProcessing && !_isUploading)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              child: TextButton.icon(
+                onPressed: _saveDraft,
+                icon: const Icon(Icons.save_outlined,
+                    color: Colors.white, size: 20),
+                label: const Text('Save Draft',
+                    style: TextStyle(color: Colors.white)),
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.2),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
+                ),
               ),
             ),
-          ),
-      ],
-    ),
-    body: _isInitializing
-        ? Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const SizedBox(
-                  width: 60,
-                  height: 60,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 4,
-                    valueColor: AlwaysStoppedAnimation<Color>(kPrimaryColor),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Initializing...',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
-            ),
-          )
-        : SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            child: Column(
-              children: [
-                // Header gradient section
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.8)],
+        ],
+      ),
+      body: _isInitializing
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 60,
+                    height: 60,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 4,
+                      valueColor: AlwaysStoppedAnimation<Color>(kPrimaryColor),
                     ),
                   ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                    child: Column(
-                      children: [
-                        // Category Display
-                        if (_effectiveCategory != null)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.white.withOpacity(0.3)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.category, color: Colors.white, size: 18),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _effectiveCategory!,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
+                  const SizedBox(height: 24),
+                  Text(
+                    'Initializing...',
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                ),
-
-                // Main content
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Title Section
-                      _buildSectionCard(
-                        icon: Icons.title,
-                        title: 'Title & Description',
-                        child: Column(
-                          children: [
-                            // Title Input
-                             Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: TextField(
-                                controller: _titleController,
-                                maxLength: 100,
-                                decoration: InputDecoration(
-                                  labelText: 'Title *',
-                                  hintText: 'Give your video an engaging title',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.transparent,
-                                  counterText: '$_titleWordCount/20 words',
-                                  counterStyle: TextStyle(
-                                    color: _titleWordCount > 20 ? Colors.red : Colors.grey[600],
-                                    fontSize: 12,
-                                  ),
-                                  errorText: _titleWordCount > 20 ? 'Title exceeds word limit' : null,
-                                  prefixIcon: const Icon(Icons.edit, color: kPrimaryColor),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-
-                            // Description Input
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.05),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: TextField(
-                                controller: _descriptionController,
-                                maxLines: 4,
-                                maxLength: 500,
-                                decoration: InputDecoration(
-                                  labelText: 'Description',
-                                  hintText: 'Tell viewers what your video is about...',
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide.none,
-                                  ),
-                                  filled: true,
-                                  fillColor: Colors.transparent,
-                                  alignLabelWithHint: true,
-                                  counterText: '$_descriptionWordCount/100 words',
-                                  counterStyle: TextStyle(
-                                    color: _descriptionWordCount > 100 ? Colors.red : Colors.grey[600],
-                                    fontSize: 12,
-                                  ),
-                                  errorText: _descriptionWordCount > 100 ? 'Description exceeds word limit' : null,
-                                  prefixIcon: const Padding(
-                                    padding:  EdgeInsets.only(bottom: 60),
-                                    child: Icon(Icons.description, color: kPrimaryColor),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                ],
+              ),
+            )
+          : SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                children: [
+                  // Header gradient section
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.8)],
                       ),
-                      const SizedBox(height: 20),
-
-                      // Language Selection
-                      _buildSectionCard(
-                        icon: Icons.language,
-                        title: 'Language',
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: DropdownButtonFormField<String>(
-                            value: _selectedLanguage,
-                            decoration: InputDecoration(
-                              labelText: 'Select Language',
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide.none,
-                              ),
-                              filled: true,
-                              fillColor: Colors.transparent,
-                              prefixIcon: const Icon(Icons.translate, color: kPrimaryColor),
-                            ),
-                            items: ['Telugu', 'Hindi', 'English', 'Tamil', 'Kannada']
-                                .map((language) => DropdownMenuItem(
-                                      value: language,
-                                      child: Text(language),
-                                    ))
-                                .toList(),
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() {
-                                  _selectedLanguage = value;
-                                });
-                              }
-                            },
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Location Section
-                      _buildSectionCard(
-                        icon: Icons.location_on,
-                        title: 'Location',
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      child: Column(
+                        children: [
+                          // Category Display
+                          if (_effectiveCategory != null)
                             Container(
-                              width: double.infinity,  
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
                               decoration: BoxDecoration(
-                                color: (_currentLatitude != null && _currentLongitude != null)
-                                    ? Colors.green.withOpacity(0.1)
-                                    : Colors.grey.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12),
+                                color: Colors.white.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: Colors.white.withOpacity(0.3)),
                               ),
                               child: Row(
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(
-                                    (_currentLatitude != null && _currentLongitude != null)
-                                        ? Icons.location_on
-                                        : Icons.location_off,
-                                    color: (_currentLatitude != null && _currentLongitude != null)
-                                        ? Colors.green
-                                        : Colors.grey[600],
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      _locationStatus,
-                                      style: TextStyle(
-                                        color: (_currentLatitude != null && _currentLongitude != null)
-                                            ? Colors.green[700]
-                                            : Colors.grey[600],
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                  const Icon(Icons.category,
+                                      color: Colors.white, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _effectiveCategory!,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            const SizedBox(height: 16),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: _isLoadingLocation ? null : _getCurrentLocation,
-                                    icon: _isLoadingLocation
-                                        ? const SizedBox(
-                                            width: 18,
-                                            height: 18,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
-                                          )
-                                        : const Icon(Icons.gps_fixed, size: 20),
-                                    label: Text(_isLoadingLocation ? 'Locating...' : 'Auto Detect'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: kPrimaryColor,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: _getLocationManually,
-                                    icon: const Icon(Icons.edit_location, size: 20),
-                                    label: const Text('Manual Entry'),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: kPrimaryColor,
-                                      side: const BorderSide(color: kPrimaryColor),
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                        ],
                       ),
-                      const SizedBox(height: 20),
+                    ),
+                  ),
 
-                      // Video Selection Section
-                      _buildSectionCard(
-                        icon: Icons.video_library,
-                        title: 'Videos',
-                        subtitle: '${_selectedVideos.length}/3 selected',
-                        child: Column(
-                          children: [
-                            // Video selection buttons
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: _selectedVideos.length >= 3 ? null : _recordVideo,
-                                    icon: const Icon(Icons.videocam, size: 20),
-                                    label: const Text('Record Video'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: kPrimaryColor,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: _selectedVideos.length >= 3 ? null : _pickVideoFromGallery,
-                                    icon: const Icon(Icons.photo_library, size: 20),
-                                    label: const Text('From Gallery'),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: kPrimaryColor,
-                                      side: const BorderSide(color: kPrimaryColor),
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                            // Selected videos list
-                            if (_selectedVideos.isNotEmpty) ...[
-                              const SizedBox(height: 20),
-                              Container(
-                                padding: const EdgeInsets.all(16),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withOpacity(0.05),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.blue.withOpacity(0.2)),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Icon(Icons.video_collection, color: Colors.blue[700]),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          'Selected Videos',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.blue[700],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 12),
-                                    ...List.generate(_selectedVideos.length, (index) {
-                                      final video = _selectedVideos[index];
-                                      final sizeInMB = _videoSizes[index] / (1024 * 1024);
-                                      return Container(
-                                        margin: const EdgeInsets.only(bottom: 8),
-                                        padding: const EdgeInsets.all(12),
-                                        decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          borderRadius: BorderRadius.circular(8),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black.withOpacity(0.05),
-                                              blurRadius: 5,
-                                              offset: const Offset(0, 1),
-                                            ),
-                                          ],
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: Colors.blue.withOpacity(0.1),
-                                                borderRadius: BorderRadius.circular(6),
-                                              ),
-                                              child: const Icon(Icons.play_arrow, color: Colors.blue, size: 20),
-                                            ),
-                                            const SizedBox(width: 12),
-                                            Expanded(
-                                              child: Column(
-                                                crossAxisAlignment: CrossAxisAlignment.start,
-                                                children: [
-                                                  Text(
-                                                    video.name,
-                                                    style: const TextStyle(
-                                                      fontWeight: FontWeight.w500,
-                                                      fontSize: 14,
-                                                    ),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                  ),
-                                                  const SizedBox(height: 2),
-                                                  Text(
-                                                    '${sizeInMB.toStringAsFixed(1)} MB',
-                                                    style: TextStyle(
-                                                      color: Colors.grey[600],
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                            IconButton(
-                                              onPressed: () => _removeVideo(index),
-                                              icon: const Icon(Icons.close, color: Colors.red, size: 20),
-                                              style: IconButton.styleFrom(
-                                                backgroundColor: Colors.red.withOpacity(0.1),
-                                                padding: const EdgeInsets.all(6),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }),
-                                    const SizedBox(height: 12),
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[100],
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Row(
-                                            children: [
-                                              Icon(Icons.data_usage, size: 16, color: Colors.grey[600]),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                'Total: ${_totalSize.toStringAsFixed(1)} MB',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey[700],
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                          Row(
-                                            children: [
-                                              Icon(Icons.schedule, size: 16, color: Colors.grey[600]),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                '~${_formatDuration(_totalDuration)}',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: Colors.grey[700],
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-
-                      // Upload Progress
-                      if (_isUploading) ...[
+                  // Main content
+                  Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Title Section
                         _buildSectionCard(
-                          icon: Icons.cloud_upload,
-                          title: 'Upload Progress',
+                          icon: Icons.title,
+                          title: 'Title & Description',
                           child: Column(
                             children: [
+                              // Title Input
                               Container(
-                                padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [Colors.blue.withOpacity(0.1), Colors.blue.withOpacity(0.05)],
-                                  ),
+                                  color: Colors.white,
                                   borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(
-                                          'Video $_currentUploadIndex of ${_selectedVideos.length}',
-                                          style: const TextStyle(fontWeight: FontWeight.w500),
-                                        ),
-                                        Text(
-                                          '${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                                          style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.blue[700],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 12),
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: LinearProgressIndicator(
-                                        value: _uploadProgress,
-                                        minHeight: 8,
-                                        backgroundColor: Colors.grey[300],
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue[600]!),
-                                      ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 2),
                                     ),
                                   ],
+                                ),
+                                child: TextField(
+                                  controller: _titleController,
+                                  maxLength: 100,
+                                  decoration: InputDecoration(
+                                    labelText: 'Title *',
+                                    hintText:
+                                        'Give your video an engaging title',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.transparent,
+                                    counterText: '$_titleWordCount/20 words',
+                                    counterStyle: TextStyle(
+                                      color: _titleWordCount > 20
+                                          ? Colors.red
+                                          : Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                    errorText: _titleWordCount > 20
+                                        ? 'Title exceeds word limit'
+                                        : null,
+                                    prefixIcon: const Icon(Icons.edit,
+                                        color: kPrimaryColor),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+
+                              // Description Input
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 2),
+                                    ),
+                                  ],
+                                ),
+                                child: TextField(
+                                  controller: _descriptionController,
+                                  maxLines: 4,
+                                  maxLength: 500,
+                                  decoration: InputDecoration(
+                                    labelText: 'Description',
+                                    hintText:
+                                        'Tell viewers what your video is about...',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    filled: true,
+                                    fillColor: Colors.transparent,
+                                    alignLabelWithHint: true,
+                                    counterText:
+                                        '$_descriptionWordCount/100 words',
+                                    counterStyle: TextStyle(
+                                      color: _descriptionWordCount > 100
+                                          ? Colors.red
+                                          : Colors.grey[600],
+                                      fontSize: 12,
+                                    ),
+                                    errorText: _descriptionWordCount > 100
+                                        ? 'Description exceeds word limit'
+                                        : null,
+                                    prefixIcon: const Padding(
+                                      padding: EdgeInsets.only(bottom: 60),
+                                      child: Icon(Icons.description,
+                                          color: kPrimaryColor),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ],
                           ),
                         ),
                         const SizedBox(height: 20),
-                      ],
 
-                      // Submit Button
-                      SizedBox(
-                        width: double.infinity,
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: (_isProcessing || _isUploading || _selectedVideos.isEmpty)
-                              ? null
-                              : _processVideos,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: kPrimaryColor,
-                            foregroundColor: Colors.white,
-                            disabledBackgroundColor: Colors.grey[300],
-                            elevation: _isProcessing || _isUploading ? 0 : 2,
-                            shadowColor: kPrimaryColor.withOpacity(0.3),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
+                        // Language Selection
+                        _buildSectionCard(
+                          icon: Icons.language,
+                          title: 'Language',
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedLanguage,
+                              decoration: InputDecoration(
+                                labelText: 'Select Language',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                                filled: true,
+                                fillColor: Colors.transparent,
+                                prefixIcon: const Icon(Icons.translate,
+                                    color: kPrimaryColor),
+                              ),
+                              items: [
+                                'Telugu',
+                                'Hindi',
+                                'English',
+                                'Tamil',
+                                'Kannada'
+                              ]
+                                  .map((language) => DropdownMenuItem(
+                                        value: language,
+                                        child: Text(language),
+                                      ))
+                                  .toList(),
+                              onChanged: (value) {
+                                if (value != null) {
+                                  setState(() {
+                                    _selectedLanguage = value;
+                                  });
+                                }
+                              },
                             ),
                           ),
-                          child: _isProcessing
-                              ? const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Location Section
+                        _buildSectionCard(
+                          icon: Icons.location_on,
+                          title: 'Location',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: (_currentLatitude != null &&
+                                          _currentLongitude != null)
+                                      ? Colors.green.withOpacity(0.1)
+                                      : Colors.grey.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
                                   children: [
-                                    SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 3,
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    Icon(
+                                      (_currentLatitude != null &&
+                                              _currentLongitude != null)
+                                          ? Icons.location_on
+                                          : Icons.location_off,
+                                      color: (_currentLatitude != null &&
+                                              _currentLongitude != null)
+                                          ? Colors.green
+                                          : Colors.grey[600],
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        _locationStatus,
+                                        style: TextStyle(
+                                          color: (_currentLatitude != null &&
+                                                  _currentLongitude != null)
+                                              ? Colors.green[700]
+                                              : Colors.grey[600],
+                                          fontWeight: FontWeight.w500,
+                                        ),
                                       ),
                                     ),
-                                     SizedBox(width: 16),
-                                     Text('Processing Videos...', style: TextStyle(fontSize: 16)),
                                   ],
-                                )
-                              : Text(
-                                  _isUploading
-                                      ? 'Uploading Videos...'
-                                      : _selectedVideos.isEmpty
-                                          ? 'Please Select Videos'
-                                          : 'Submit Videos',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 16),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _isLoadingLocation
+                                          ? null
+                                          : _getCurrentLocation,
+                                      icon: _isLoadingLocation
+                                          ? const SizedBox(
+                                              width: 18,
+                                              height: 18,
+                                              child: CircularProgressIndicator(
+                                                  strokeWidth: 2),
+                                            )
+                                          : const Icon(Icons.gps_fixed,
+                                              size: 20),
+                                      label: Text(_isLoadingLocation
+                                          ? 'Locating...'
+                                          : 'Auto Detect'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: kPrimaryColor,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: _getLocationManually,
+                                      icon: const Icon(Icons.edit_location,
+                                          size: 20),
+                                      label: const Text('Manual Entry'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: kPrimaryColor,
+                                        side: const BorderSide(
+                                            color: kPrimaryColor),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 12),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+
+                        // Video Selection Section
+                        _buildSectionCard(
+                          icon: Icons.video_library,
+                          title: 'Videos',
+                          subtitle: '${_selectedVideos.length}/3 selected',
+                          child: Column(
+                            children: [
+                              // Video selection buttons
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _selectedVideos.length >= 3
+                                          ? null
+                                          : _recordVideo,
+                                      icon:
+                                          const Icon(Icons.videocam, size: 20),
+                                      label: const Text('Record Video'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: kPrimaryColor,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 14),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: _selectedVideos.length >= 3
+                                          ? null
+                                          : _pickVideoFromGallery,
+                                      icon: const Icon(Icons.photo_library,
+                                          size: 20),
+                                      label: const Text('From Gallery'),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: kPrimaryColor,
+                                        side: const BorderSide(
+                                            color: kPrimaryColor),
+                                        padding: const EdgeInsets.symmetric(
+                                            vertical: 14),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+
+                              // Selected videos list
+                              if (_selectedVideos.isNotEmpty) ...[
+                                const SizedBox(height: 20),
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withOpacity(0.05),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                        color: Colors.blue.withOpacity(0.2)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(Icons.video_collection,
+                                              color: Colors.blue[700]),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Selected Videos',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.blue[700],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      ...List.generate(_selectedVideos.length,
+                                          (index) {
+                                        final video = _selectedVideos[index];
+                                        final sizeInMB =
+                                            _videoSizes[index] / (1024 * 1024);
+                                        return Container(
+                                          margin:
+                                              const EdgeInsets.only(bottom: 8),
+                                          padding: const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white,
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withOpacity(0.05),
+                                                blurRadius: 5,
+                                                offset: const Offset(0, 1),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.blue
+                                                      .withOpacity(0.1),
+                                                  borderRadius:
+                                                      BorderRadius.circular(6),
+                                                ),
+                                                child: const Icon(
+                                                    Icons.play_arrow,
+                                                    color: Colors.blue,
+                                                    size: 20),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment:
+                                                      CrossAxisAlignment.start,
+                                                  children: [
+                                                    Text(
+                                                      video.name,
+                                                      style: const TextStyle(
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                        fontSize: 14,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                    const SizedBox(height: 2),
+                                                    Text(
+                                                      '${sizeInMB.toStringAsFixed(1)} MB',
+                                                      style: TextStyle(
+                                                        color: Colors.grey[600],
+                                                        fontSize: 12,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              IconButton(
+                                                onPressed: () =>
+                                                    _removeVideo(index),
+                                                icon: const Icon(Icons.close,
+                                                    color: Colors.red,
+                                                    size: 20),
+                                                style: IconButton.styleFrom(
+                                                  backgroundColor: Colors.red
+                                                      .withOpacity(0.1),
+                                                  padding:
+                                                      const EdgeInsets.all(6),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }),
+                                      const SizedBox(height: 12),
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey[100],
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Icon(Icons.data_usage,
+                                                    size: 16,
+                                                    color: Colors.grey[600]),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  'Total: ${_totalSize.toStringAsFixed(1)} MB',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey[700],
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            Row(
+                                              children: [
+                                                Icon(Icons.schedule,
+                                                    size: 16,
+                                                    color: Colors.grey[600]),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '~${_formatDuration(_totalDuration)}',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.grey[700],
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      // Help Section
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [Colors.blue[50]!, Colors.indigo[50]!],
+                              ],
+                            ],
                           ),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.blue[200]!.withOpacity(0.5)),
                         ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                        const SizedBox(height: 20),
+
+                        // Upload Progress
+                        if (_isUploading) ...[
+                          _buildSectionCard(
+                            icon: Icons.cloud_upload,
+                            title: 'Upload Progress',
+                            child: Column(
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.all(8),
+                                  padding: const EdgeInsets.all(16),
                                   decoration: BoxDecoration(
-                                    color: Colors.blue[100],
-                                    borderRadius: BorderRadius.circular(8),
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.blue.withOpacity(0.1),
+                                        Colors.blue.withOpacity(0.05)
+                                      ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: Icon(Icons.lightbulb_outline, color: Colors.blue[700], size: 20),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  'Quick Tips',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue[800],
-                                    fontSize: 16,
+                                  child: Column(
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(
+                                            'Video $_currentUploadIndex of ${_selectedVideos.length}',
+                                            style: const TextStyle(
+                                                fontWeight: FontWeight.w500),
+                                          ),
+                                          Text(
+                                            '${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: Colors.blue[700],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: LinearProgressIndicator(
+                                          value: _uploadProgress,
+                                          minHeight: 8,
+                                          backgroundColor: Colors.grey[300],
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.blue[600]!),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 16),
-                            _buildTipItem('📹', 'Maximum 3 videos per submission'),
-                            _buildTipItem('📦', 'Each video should be under 100MB'),
-                            _buildTipItem('⏱️', 'Recording: 5 min max, Gallery: 10 min max'),
-                            _buildTipItem('📍', 'Add location for better discoverability'),
-                            _buildTipItem('✏️', 'Use engaging titles and clear descriptions'),
-                          ],
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+
+                        // Submit Button
+                        SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: (_isProcessing ||
+                                    _isUploading ||
+                                    _selectedVideos.isEmpty)
+                                ? null
+                                : _processVideos,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: kPrimaryColor,
+                              foregroundColor: Colors.white,
+                              disabledBackgroundColor: Colors.grey[300],
+                              elevation: _isProcessing || _isUploading ? 0 : 2,
+                              shadowColor: kPrimaryColor.withOpacity(0.3),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: _isProcessing
+                                ? const Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 3,
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                                  Colors.white),
+                                        ),
+                                      ),
+                                      SizedBox(width: 16),
+                                      Text('Processing Videos...',
+                                          style: TextStyle(fontSize: 16)),
+                                    ],
+                                  )
+                                : Text(
+                                    _isUploading
+                                        ? 'Uploading Videos...'
+                                        : _selectedVideos.isEmpty
+                                            ? 'Please Select Videos'
+                                            : 'Submit Videos',
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+
+                        // Help Section
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Colors.blue[50]!, Colors.indigo[50]!],
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: Colors.blue[200]!.withOpacity(0.5)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue[100],
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Icon(Icons.lightbulb_outline,
+                                        color: Colors.blue[700], size: 20),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    'Quick Tips',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.blue[800],
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _buildTipItem(
+                                  '📹', 'Maximum 3 videos per submission'),
+                              _buildTipItem(
+                                  '📦', 'Each video should be under 100MB'),
+                              _buildTipItem('⏱️',
+                                  'Recording: 5 min max, Gallery: 10 min max'),
+                              _buildTipItem('📍',
+                                  'Add location for better discoverability'),
+                              _buildTipItem('✏️',
+                                  'Use engaging titles and clear descriptions'),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildSectionCard({
+    required IconData icon,
+    required String title,
+    String? subtitle,
+    required Widget child,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 15,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: kPrimaryColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: kPrimaryColor, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2D3748),
                         ),
                       ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ],
             ),
-          ),
-  );
-}
-
-Widget _buildSectionCard({
-  required IconData icon,
-  required String title,
-  String? subtitle,
-  required Widget child,
-}) {
-  return Container(
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(16),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.08),
-          blurRadius: 15,
-          offset: const Offset(0, 4),
+            const SizedBox(height: 16),
+            child,
+          ],
         ),
-      ],
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
+      ),
+    );
+  }
+
+  Widget _buildTipItem(String emoji, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: kPrimaryColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(icon, color: kPrimaryColor, size: 22),
+          Text(emoji, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                color: Colors.blue[800],
+                height: 1.4,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2D3748),
-                      ),
-                    ),
-                    if (subtitle != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        subtitle,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          child,
-        ],
-      ),
-    ),
-  );
-}
-
-Widget _buildTipItem(String emoji, String text) {
-  return Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(emoji, style: const TextStyle(fontSize: 14)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.blue[800],
-              height: 1.4,
             ),
           ),
-        ),
-      ],
-    ),
-  );
- }
+        ],
+      ),
+    );
+  }
 }

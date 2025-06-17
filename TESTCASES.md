@@ -39,3 +39,10 @@
 - Select the language toggle
 - Check the video Upload from gallery feature
 - try the start recording Button and tell if the video is being recorded
+9. **For Image input**
+- Select the language toggle
+- Check the image Upload from gallery feature
+- Check camera input feature
+- try submitting the image and wait for the success banner
+10. **Test the logout**
+- press the logout and see if its propely logging you out

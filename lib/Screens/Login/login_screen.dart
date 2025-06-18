@@ -45,21 +45,23 @@ class MobileLoginScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: <Widget>[
-        LoginScreenTopImage(),
-        Row(
-          children: [
-            Spacer(),
-            Expanded(
-              flex: 8,
-              child: LoginForm(),
-            ),
-            Spacer(),
-          ],
-        ),
-      ],
+    return SingleChildScrollView(
+      child: const Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          LoginScreenTopImage(),
+          Row(
+            children: [
+              Spacer(),
+              Expanded(
+                flex: 8,
+                child: LoginForm(),
+              ),
+              Spacer(),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

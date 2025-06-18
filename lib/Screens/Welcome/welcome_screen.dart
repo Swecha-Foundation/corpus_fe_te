@@ -11,30 +11,28 @@ class WelcomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Background(
-      child: SingleChildScrollView(
-        child: SafeArea(
-          child: Responsive(
-            desktop: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: WelcomeImage(),
+      child: SafeArea(
+        child: Responsive(
+          desktop: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Expanded(
+                child: WelcomeImage(),
+              ),
+              Expanded(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 450,
+                      child: LoginAndSignupBtn(),
+                    ),
+                  ],
                 ),
-                Expanded(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 450,
-                        child: LoginAndSignupBtn(),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            mobile: MobileWelcomeScreen(),
+              ),
+            ],
           ),
+          mobile: MobileWelcomeScreen(),
         ),
       ),
     );

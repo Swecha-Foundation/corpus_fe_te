@@ -12,7 +12,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../constants.dart';
 import '../../services/api_service.dart';
 import '../../services/token_storage_service.dart';
-import '../../services/uuid_service.dart'; // Added missing import
+import '../../services/uuid_service.dart';
 
 double cos(double radians) {
   return math.cos(radians);
@@ -42,6 +42,10 @@ class AudioInputScreen extends StatefulWidget {
 
 class _AudioInputScreenState extends State<AudioInputScreen>
     with TickerProviderStateMixin {
+  
+  // Add title controller
+  final TextEditingController _titleController = TextEditingController();
+  
   bool _isRecording = false;
   bool _isPaused = false;
   bool _hasRecording = false;
@@ -50,14 +54,15 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   bool _isInitializing = false;
   bool _locationPermissionGranted = false;
   bool _locationEnabled = false;
-
   Duration _recordingDuration = Duration.zero;
   Duration _playbackPosition = Duration.zero;
   Timer? _recordingTimer;
   Timer? _playbackTimer;
-
   String _selectedLanguage = 'Telugu';
   double _audioLevel = 0.0;
+  
+  // Add title word count
+  int _titleWordCount = 0;
 
   // Audio components
   AudioRecorder? _audioRecorder;
@@ -106,9 +111,34 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   @override
   void initState() {
     super.initState();
+    // Add title listener
+    _titleController.addListener(_updateTitleWordCount);
     _initializeData();
     _initializeAudio();
     _setupAnimations();
+  }
+
+  @override
+  void dispose() {
+    // Dispose title controller
+    _titleController.removeListener(_updateTitleWordCount);
+    _titleController.dispose();
+    
+    _recordingTimer?.cancel();
+    _playbackTimer?.cancel();
+    _pulseController.dispose();
+    _waveController.dispose();
+    _audioRecorder?.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
+  // Add title word count method
+  void _updateTitleWordCount() {
+    final text = _titleController.text.trim();
+    setState(() {
+      _titleWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
+    });
   }
 
   // Initialize data with proper authentication and categories
@@ -243,7 +273,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         }
       } catch (e) {
         print('DEBUG: Token test failed: $e');
-
         // If it's a network error, we might still have a valid token
         if (e.toString().contains('network') ||
             e.toString().contains('connection')) {
@@ -251,7 +280,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
               'DEBUG: Network error during token validation, assuming token is valid');
           return true;
         }
-
         return false;
       }
     } catch (e) {
@@ -280,7 +308,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
           setState(() {
             _isPlaying = state == PlayerState.playing;
           });
-
           if (state == PlayerState.completed) {
             _stopPlayback();
           }
@@ -329,7 +356,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     try {
       // Check and request location permissions
       await _checkLocationPermissions();
-
       // If permissions are granted, get current location
       if (_locationPermissionGranted && _locationEnabled) {
         await _getCurrentLocation();
@@ -354,7 +380,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
       // Check current permission status
       LocationPermission permission = await Geolocator.checkPermission();
-
       if (permission == LocationPermission.denied) {
         // Request permission
         permission = await Geolocator.requestPermission();
@@ -447,7 +472,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
       // Request location permission
       LocationPermission permission = await Geolocator.requestPermission();
-
       setState(() {
         _locationPermissionGranted =
             permission == LocationPermission.whileInUse ||
@@ -506,6 +530,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
           _currentLongitude = _currentPosition!.longitude;
           _locationStatus = 'Location obtained';
         });
+
         print(
             'Location obtained: ${_currentPosition?.latitude}, ${_currentPosition?.longitude}');
         _showSuccess('Location updated successfully');
@@ -524,7 +549,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-
     _waveController = AnimationController(
       duration: const Duration(milliseconds: 2000),
       vsync: this,
@@ -541,23 +565,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     _pulseController.repeat(reverse: true);
   }
 
-  @override
-  void dispose() {
-    _recordingTimer?.cancel();
-    _playbackTimer?.cancel();
-    _pulseController.dispose();
-    _waveController.dispose();
-    _audioRecorder?.dispose();
-    _audioPlayer.dispose();
-    super.dispose();
-  }
-
   // Enhanced permission handling method
   Future<bool> _requestPermissions() async {
     try {
       // Check current microphone permission status
       PermissionStatus microphoneStatus = await Permission.microphone.status;
-
       if (microphoneStatus.isDenied) {
         // Request microphone permission
         microphoneStatus = await Permission.microphone.request();
@@ -576,7 +588,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         // For Android, also check storage permission
         if (Platform.isAndroid) {
           PermissionStatus storageStatus = await Permission.storage.status;
-
           if (storageStatus.isDenied) {
             storageStatus = await Permission.storage.request();
           }
@@ -598,7 +609,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
     }
   }
 
-// Enhanced permission dialog
+  // Enhanced permission dialog
   void _showPermissionDialog(String title, String message) {
     showDialog(
       context: context,
@@ -735,7 +746,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       setState(() {
         _isPaused = false;
       });
-
       _waveController.repeat();
 
       _recordingTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -766,7 +776,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       if (_audioRecorder == null) return;
 
       final path = await _audioRecorder!.stop();
-
       setState(() {
         _isRecording = false;
         _isPaused = false;
@@ -800,7 +809,6 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
     try {
       await _audioPlayer.play(DeviceFileSource(_audioFile!.path));
-
       setState(() {
         _isPlaying = true;
         _playbackPosition = Duration.zero;
@@ -880,6 +888,17 @@ class _AudioInputScreenState extends State<AudioInputScreen>
   }
 
   Future<void> _submitRecording() async {
+    // Check if title is provided
+    if (_titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a title for your recording'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     if (!_hasRecording || _audioFile == null || _userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -899,6 +918,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text('Title: ${_titleController.text.trim()}'),
               Text('Duration: ${_formatDuration(_recordingDuration)}'),
               Text('Language: $_selectedLanguage'),
               if (_effectiveCategory != null)
@@ -988,9 +1008,9 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       print('DEBUG: Category ID: $categoryId');
       print('DEBUG: File size: $fileSize bytes');
 
-      // Step 4: Create record
+      // Step 4: Create record with title
       final createResult = await ApiService.createRecord(
-        title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}',
+        title: _titleController.text.trim(), // Use the title from input
         description:
             'Audio recording in $_selectedLanguage language (${_formatDuration(_recordingDuration)})',
         categoryId: categoryId,
@@ -1022,7 +1042,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
       final uploadResult = await ApiService.uploadRecord(
         recordId: _currentRecordId!,
         file: _audioFile!,
-        title: 'Audio Recording - ${DateTime.now().toString().split('.')[0]}',
+        title: _titleController.text.trim(), // Use the title from input
         categoryId: categoryId,
         userId: _userId!,
         mediaType: 'audio',
@@ -1046,6 +1066,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
         'recordId': _currentRecordId,
         'duration': _recordingDuration.inSeconds,
         'category': _effectiveCategory,
+        'title': _titleController.text.trim(),
       });
     } catch (e) {
       print('Submit error: $e');
@@ -1075,13 +1096,11 @@ class _AudioInputScreenState extends State<AudioInputScreen>
 
     // Try different possible field names
     final possibleFields = ['uid', 'id', 'recordId', 'record_id'];
-
     for (String field in possibleFields) {
       if (recordData[field] != null) {
         return recordData[field].toString();
       }
     }
-
     return null;
   }
 
@@ -1144,6 +1163,44 @@ class _AudioInputScreenState extends State<AudioInputScreen>
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  // Add title section widget
+  Widget _buildTitleSection() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            offset: const Offset(0, 2),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: _titleController,
+        maxLength: 100,
+        decoration: InputDecoration(
+          labelText: 'Recording Title *',
+          hintText: 'Give your recording a descriptive title',
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: Colors.transparent,
+          counterText: '$_titleWordCount/20 words',
+          counterStyle: TextStyle(
+            color: _titleWordCount > 20 ? Colors.red : Colors.grey[600],
+            fontSize: 12,
+          ),
+          errorText: _titleWordCount > 20 ? 'Title exceeds word limit' : null,
+          prefixIcon: const Icon(Icons.title, color: kPrimaryColor),
+        ),
       ),
     );
   }
@@ -1256,6 +1313,58 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                       ],
                     ),
                   ),
+
+                  // Title Section
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          offset: const Offset(0, 2),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: kPrimaryColor.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.title,
+                                color: kPrimaryColor,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            const Text(
+                              'Recording Title',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2D3748),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        _buildTitleSection(),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
 
                   // Recording Visualization
                   Expanded(
@@ -1395,7 +1504,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                                     width: 20,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                      valueColor: AlwaysStoppedAnimation(
                                           Colors.white),
                                     ),
                                   ),
@@ -1561,7 +1670,7 @@ class _AudioInputScreenState extends State<AudioInputScreen>
                       _recordingDuration.inSeconds,
                   backgroundColor: Colors.grey.withOpacity(0.2),
                   valueColor:
-                      const AlwaysStoppedAnimation<Color>(Colors.purple),
+                      const AlwaysStoppedAnimation(Colors.purple),
                 ),
               ),
             ],

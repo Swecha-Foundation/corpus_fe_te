@@ -179,8 +179,8 @@ class TokenStorageService {
     }
   }
 
-  // Get all stored user data
-  static Future<Map<String, dynamic>> getUserData() async {
+  // Get all stored user data - CHANGED TO RETURN Map<String, String?>
+  static Future<Map<String, String?>> getUserData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
@@ -197,7 +197,7 @@ class TokenStorageService {
         'userName': prefs.getString(_userNameKey),
         'refreshToken': prefs.getString(_refreshTokenKey),
         'tokenExpiry': prefs.getString(_tokenExpiryKey),
-        'isLoggedIn': isLoggedIn,
+        'isLoggedIn': isLoggedIn.toString(), // Convert bool to String
       };
     } catch (e) {
       print('Error getting user data: $e');
@@ -341,7 +341,7 @@ class TokenStorageService {
     }
   }
 
-  // Debug print stored auth data
+  // Debug print stored auth data - UPDATED FOR String? format
   static Future<void> debugPrintAuthData() async {
     final userData = await getUserData();
     print('=== Stored Auth Data ===');

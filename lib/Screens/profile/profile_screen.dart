@@ -8,7 +8,7 @@ import '../../../services/token_storage_service.dart';
 class ProfileScreen extends StatefulWidget {
   final String userName;
   final String phoneNumber;
-  
+
   const ProfileScreen({
     Key? key,
     required this.userName,
@@ -23,20 +23,20 @@ class _ProfileScreenState extends State<ProfileScreen>
     with TickerProviderStateMixin {
   late AnimationController _fadeController;
   late AnimationController _slideController;
-  
+
   // Profile data
   String displayName = '';
   String email = '';
   bool notificationsEnabled = true;
   bool darkModeEnabled = false;
   bool biometricEnabled = false;
-  
+
   @override
   void initState() {
     super.initState();
     displayName = widget.userName;
     email = '${widget.userName.toLowerCase().replaceAll(' ', '')}@example.com';
-    
+
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
@@ -45,7 +45,7 @@ class _ProfileScreenState extends State<ProfileScreen>
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    
+
     // Add a small delay before starting animations to ensure widget is mounted
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -145,7 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen>
               const SizedBox(width: 16),
             ],
           ),
-          
+
           // Profile Content
           SliverToBoxAdapter(
             child: Padding(
@@ -155,19 +155,19 @@ class _ProfileScreenState extends State<ProfileScreen>
                   // Profile Header Card
                   _buildProfileHeaderCard(),
                   const SizedBox(height: 24),
-                  
+
                   // Quick Stats
                   _buildQuickStats(),
                   const SizedBox(height: 24),
-                  
+
                   // Settings Section
                   _buildSettingsSection(),
                   const SizedBox(height: 24),
-                  
+
                   // Account Actions
                   _buildAccountActionsSection(),
                   const SizedBox(height: 24),
-                  
+
                   // App Info
                   _buildAppInfoSection(),
                 ],
@@ -227,7 +227,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                         height: 100,
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.7)],
+                            colors: [
+                              kPrimaryColor,
+                              kPrimaryColor.withOpacity(0.7)
+                            ],
                           ),
                           borderRadius: BorderRadius.circular(25),
                           boxShadow: [
@@ -271,7 +274,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                               borderRadius: BorderRadius.circular(12),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF43e97b).withOpacity(0.3),
+                                  color:
+                                      const Color(0xFF43e97b).withOpacity(0.3),
                                   offset: const Offset(0, 4),
                                   blurRadius: 8,
                                 ),
@@ -288,7 +292,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                     ],
                   ),
                   const SizedBox(height: 20),
-                  
+
                   // User Info
                   Text(
                     displayName,
@@ -338,11 +342,17 @@ class _ProfileScreenState extends State<ProfileScreen>
           )),
           child: Row(
             children: [
-              Expanded(child: _buildStatCard('12', 'Recordings', const Color(0xFF4facfe))),
+              Expanded(
+                  child: _buildStatCard(
+                      '12', 'Recordings', const Color(0xFF4facfe))),
               const SizedBox(width: 16),
-              Expanded(child: _buildStatCard('3.2GB', 'Storage Used', const Color(0xFF43e97b))),
+              Expanded(
+                  child: _buildStatCard(
+                      '3.2GB', 'Storage Used', const Color(0xFF43e97b))),
               const SizedBox(width: 16),
-              Expanded(child: _buildStatCard('24', 'Days Active', const Color(0xFFfa709a))),
+              Expanded(
+                  child: _buildStatCard(
+                      '24', 'Days Active', const Color(0xFFfa709a))),
             ],
           ),
         );
@@ -723,8 +733,10 @@ class _ProfileScreenState extends State<ProfileScreen>
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildInfoButton('Privacy Policy', Icons.privacy_tip_rounded),
-                    _buildInfoButton('Terms of Service', Icons.description_rounded),
+                    _buildInfoButton(
+                        'Privacy Policy', Icons.privacy_tip_rounded),
+                    _buildInfoButton(
+                        'Terms of Service', Icons.description_rounded),
                     _buildInfoButton('Support', Icons.help_outline_rounded),
                   ],
                 ),
@@ -745,7 +757,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               content: Text('Opening $title...'),
               backgroundColor: kPrimaryColor,
               behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
             ),
           );
         }
@@ -788,7 +801,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Row(
             children: [
               Container(
@@ -814,7 +828,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                 controller: nameController,
                 decoration: InputDecoration(
                   labelText: 'Display Name',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: kPrimaryColor),
@@ -826,7 +841,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                 controller: emailController,
                 decoration: InputDecoration(
                   labelText: 'Email',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: kPrimaryColor),
@@ -855,7 +871,8 @@ class _ProfileScreenState extends State<ProfileScreen>
                       content: const Text('Profile updated successfully!'),
                       backgroundColor: kPrimaryColor,
                       behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                   );
                 }
@@ -863,7 +880,8 @@ class _ProfileScreenState extends State<ProfileScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: kPrimaryColor,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
               ),
               child: const Text('Save'),
             ),
@@ -879,9 +897,11 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('Change Profile Photo'),
-          content: const Text('This feature will be available in the next update.'),
+          content:
+              const Text('This feature will be available in the next update.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -899,9 +919,11 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('Change Password'),
-          content: const Text('Password change functionality will be implemented soon.'),
+          content: const Text(
+              'Password change functionality will be implemented soon.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -919,7 +941,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('Storage Management'),
           content: const Text('Storage management features coming soon.'),
           actions: [
@@ -939,7 +962,8 @@ class _ProfileScreenState extends State<ProfileScreen>
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('Backup & Sync'),
           content: const Text('Backup functionality will be available soon.'),
           actions: [
@@ -954,110 +978,112 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   void _showLogoutDialog() {
-  showDialog(
-    context: context,
-    builder: (BuildContext context) {
-      return AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.logout_rounded,
+                  color: Colors.orange,
+                  size: 20,
+                ),
               ),
-              child: const Icon(
-                Icons.logout_rounded,
-                color: Colors.orange,
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Text('Logout'),
-          ],
-        ),
-        content: const Text(
-          'Are you sure you want to logout from your account?',
-          style: TextStyle(fontSize: 16),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+              const SizedBox(width: 12),
+              const Text('Logout'),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              // Close the dialog first
-              Navigator.pop(context);
-              
-              // Show loading indicator
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: const Row(
-                      children: [
-                        SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        ),
-                        SizedBox(width: 16),
-                        Text('Logging out...'),
-                      ],
-                    ),
-                    backgroundColor: Colors.orange,
-                    behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              }
-              
-              try {
-                // Clear all stored authentication data
-                await TokenStorageService.clearAuthData();
-                
-                // Optional: Debug print to verify data is cleared
-                // await TokenStorageService.debugPrintAuthData();
-                
-                // Navigate back to welcome screen and clear all previous routes
-                if (mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(
-                      builder: (context) => const WelcomeScreen(),
-                    ),
-                    (Route<dynamic> route) => false,
-                  );
-                }
-              } catch (e) {
-                // Handle logout error
+          content: const Text(
+            'Are you sure you want to logout from your account?',
+            style: TextStyle(fontSize: 16),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            // In your _showLogoutDialog method, replace the ElevatedButton onPressed with this:
+            ElevatedButton(
+              onPressed: () async {
+                // Close the dialog first
+                Navigator.pop(context);
+
+                // Show loading indicator
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Logout failed: ${e.toString()}'),
-                      backgroundColor: Colors.red,
+                      content: const Row(
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          ),
+                          SizedBox(width: 16),
+                          Text('Logging out...'),
+                        ],
+                      ),
+                      backgroundColor: Colors.orange,
                       behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      duration: const Duration(seconds: 2),
                     ),
                   );
                 }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+
+                try {
+                  // Clear all stored authentication data
+                  await TokenStorageService.clearAuthData();
+
+                  // Navigate back to welcome screen and clear all previous routes
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const WelcomeScreen(),
+                      ),
+                      (Route<dynamic> route) => false,
+                    );
+                  }
+                } catch (e) {
+                  // Handle logout error
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Logout failed: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Logout'),
             ),
-            child: const Text('Logout'),
-          ),
-        ],
-      );
-    },
-  );
-}
+          ],
+        );
+      },
+    );
+  }
 }

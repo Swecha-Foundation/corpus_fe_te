@@ -26,12 +26,15 @@ class TextInputScreen extends StatefulWidget {
 }
 
 class _TextInputScreenState extends State<TextInputScreen> {
+  final TextEditingController _titleController = TextEditingController();
   final TextEditingController _textController = TextEditingController();
-  final FocusNode _focusNode = FocusNode();
+  final FocusNode _titleFocusNode = FocusNode();
+  final FocusNode _textFocusNode = FocusNode();
   bool _isUploading = false;
   bool _isInitializing = true;
   int _wordCount = 0;
   int _characterCount = 0;
+  int _titleWordCount = 0; // Changed to match AudioInputScreen
   String _selectedLanguage = 'Telugu';
 
   // API related variables
@@ -49,10 +52,12 @@ class _TextInputScreenState extends State<TextInputScreen> {
   bool _isLocationEnabled = false;
   bool _isLocationLoading = false;
   String _locationStatus = 'Location not available';
+  bool _locationPermissionGranted = false;
 
   @override
   void initState() {
     super.initState();
+    _titleController.addListener(_updateTitleWordCount); // Changed to match AudioInputScreen
     _textController.addListener(_updateCounts);
     _initializeData();
     _checkLocationPermission();
@@ -166,8 +171,15 @@ class _TextInputScreenState extends State<TextInputScreen> {
         return;
       }
 
+      setState(() {
+        _locationPermissionGranted = permission == LocationPermission.whileInUse ||
+            permission == LocationPermission.always;
+      });
+
       // If we have permission, get location
-      await _getCurrentLocation();
+      if (_locationPermissionGranted) {
+        await _getCurrentLocation();
+      }
     } catch (e) {
       print('Error checking location permission: $e');
       setState(() {
@@ -207,27 +219,35 @@ class _TextInputScreenState extends State<TextInputScreen> {
   }
 
   Future<void> _requestLocationPermission() async {
-    // First check if location service is enabled
-    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    
-    if (!serviceEnabled) {
-      // Show dialog to enable location services
-      _showLocationServiceDialog();
-      return;
-    }
+    try {
+      // First check if location service is enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      
+      if (!serviceEnabled) {
+        // Show dialog to enable location services
+        _showLocationServiceDialog();
+        return;
+      }
 
-    // Request location permission
-    LocationPermission permission = await Geolocator.requestPermission();
-    
-    if (permission == LocationPermission.whileInUse ||
-        permission == LocationPermission.always) {
-      await _getCurrentLocation();
-    } else if (permission == LocationPermission.deniedForever) {
-      _showPermissionSettingsDialog();
-    } else {
+      // Request location permission
+      LocationPermission permission = await Geolocator.requestPermission();
+      
       setState(() {
-        _locationStatus = 'Location permission denied';
+        _locationPermissionGranted = permission == LocationPermission.whileInUse ||
+            permission == LocationPermission.always;
       });
+
+      if (_locationPermissionGranted) {
+        await _getCurrentLocation();
+      } else if (permission == LocationPermission.deniedForever) {
+        _showPermissionSettingsDialog();
+      } else {
+        setState(() {
+          _locationStatus = 'Location permission denied';
+        });
+      }
+    } catch (e) {
+      print('Error requesting location permission: $e');
     }
   }
 
@@ -369,10 +389,21 @@ class _TextInputScreenState extends State<TextInputScreen> {
 
   @override
   void dispose() {
+    _titleController.removeListener(_updateTitleWordCount);
     _textController.removeListener(_updateCounts);
+    _titleController.dispose();
     _textController.dispose();
-    _focusNode.dispose();
+    _titleFocusNode.dispose();
+    _textFocusNode.dispose();
     super.dispose();
+  }
+
+  // Changed to match AudioInputScreen - word count instead of character count
+  void _updateTitleWordCount() {
+    final text = _titleController.text.trim();
+    setState(() {
+      _titleWordCount = text.isEmpty ? 0 : text.split(RegExp(r'\s+')).length;
+    });
   }
 
   void _updateCounts() {
@@ -390,8 +421,14 @@ class _TextInputScreenState extends State<TextInputScreen> {
       final fileName = 'text_${DateTime.now().millisecondsSinceEpoch}.txt';
       _textFile = File('${directory.path}/$fileName');
 
-      // Write text content to file
-      await _textFile!.writeAsString(_textController.text);
+      // Write both title and text content to file
+      String fileContent = '';
+      if (_titleController.text.trim().isNotEmpty) {
+        fileContent += 'Title: ${_titleController.text.trim()}\n\n';
+      }
+      fileContent += _textController.text;
+
+      await _textFile!.writeAsString(fileContent);
     } catch (e) {
       print('Error creating text file: $e');
       throw Exception('Failed to create text file: $e');
@@ -403,6 +440,17 @@ class _TextInputScreenState extends State<TextInputScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter some text before submitting'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    // Check if title is provided (matching AudioInputScreen requirement)
+    if (_titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a title for your text'),
           backgroundColor: Colors.orange,
         ),
       );
@@ -449,6 +497,9 @@ class _TextInputScreenState extends State<TextInputScreen> {
         return;
       }
 
+      // Use custom title from input
+      String title = _titleController.text.trim();
+
       // Prepare description with location info if available
       String description = 'Text content in $_selectedLanguage language ($_wordCount words)';
       if (_isLocationEnabled && _latitude != null && _longitude != null) {
@@ -456,7 +507,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
       }
 
       final result = await ApiService.createAndUploadRecord(
-        title: 'Text Input - ${DateTime.now().toString().split('.')[0]}',
+        title: title,
         description: description,
         userId: currentUserId,
         mediaType: 'text',
@@ -536,8 +587,8 @@ class _TextInputScreenState extends State<TextInputScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: const Text('Clear Text'),
-          content: const Text('Are you sure you want to clear all text?'),
+          title: const Text('Clear All'),
+          content: const Text('Are you sure you want to clear both title and text?'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
@@ -547,6 +598,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
               onPressed: () async {
                 Navigator.pop(context);
                 setState(() {
+                  _titleController.clear();
                   _textController.clear();
                 });
                 await _cleanupTempFile();
@@ -611,79 +663,134 @@ class _TextInputScreenState extends State<TextInputScreen> {
     });
   }
 
-  Widget _buildLocationCard() {
+  Widget _buildLocationStatus() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: _locationPermissionGranted && _isLocationEnabled
+            ? Colors.green.withOpacity(0.1)
+            : Colors.orange.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _locationPermissionGranted && _isLocationEnabled
+              ? Colors.green
+              : Colors.orange,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _locationPermissionGranted && _isLocationEnabled
+                ? Icons.location_on
+                : Icons.location_off,
+            size: 14,
+            color: _locationPermissionGranted && _isLocationEnabled
+                ? Colors.green
+                : Colors.orange,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            _locationPermissionGranted && _isLocationEnabled
+                ? 'Location enabled'
+                : 'Location disabled',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: _locationPermissionGranted && _isLocationEnabled
+                  ? Colors.green
+                  : Colors.orange,
+            ),
+          ),
+          if (!_locationPermissionGranted || !_isLocationEnabled) ...[
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: _requestLocationPermission,
+              child: const Icon(
+                Icons.settings,
+                size: 14,
+                color: Colors.orange,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Updated title section to match AudioInputScreen styling
+  Widget _buildTitleSection() {
+    return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.shade200,
-            blurRadius: 8,
+            color: Colors.black.withOpacity(0.05),
             offset: const Offset(0, 2),
+            blurRadius: 8,
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: TextField(
+        controller: _titleController,
+        maxLength: 100,
+        decoration: InputDecoration(
+          labelText: 'Text Title *',
+          hintText: 'Give your text a descriptive title',
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          filled: true,
+          fillColor: Colors.transparent,
+          counterText: '$_titleWordCount/20 words',
+          counterStyle: TextStyle(
+            color: _titleWordCount > 20 ? Colors.red : Colors.grey[600],
+            fontSize: 12,
+          ),
+          errorText: _titleWordCount > 20 ? 'Title exceeds word limit' : null,
+          prefixIcon: const Icon(Icons.title, color: kPrimaryColor),
+        ),
+      ),
+    );
+  }
+
+  void _showLanguageSelector() {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                _isLocationEnabled ? Icons.location_on : Icons.location_off,
-                color: _isLocationEnabled ? Colors.green : Colors.grey,
-                size: 20,
-              ),
-              const SizedBox(width: 8),
               const Text(
-                'Location',
+                'Select Language',
                 style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: kPrimaryColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
-              const Spacer(),
-              if (_isLocationLoading)
-                const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: kPrimaryColor,
-                  ),
-                ),
-              Switch(
-                value: _isLocationEnabled,
-                onChanged: (_) => _toggleLocation(),
-                activeColor: kPrimaryColor,
-              ),
+              const SizedBox(height: 16),
+              ...['Telugu', 'English', 'Hindi', 'Tamil', 'Kannada', 'Malayalam']
+                  .map((language) => ListTile(
+                        title: Text(language),
+                        trailing: _selectedLanguage == language
+                            ? const Icon(Icons.check, color: kPrimaryColor)
+                            : null,
+                        onTap: () {
+                          setState(() {
+                            _selectedLanguage = language;
+                          });
+                          Navigator.pop(context);
+                        },
+                      )),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            _locationStatus,
-            style: TextStyle(
-              fontSize: 12,
-              color: _isLocationEnabled ? Colors.green : Colors.grey,
-            ),
-          ),
-          if (_isLocationEnabled && _latitude != null && _longitude != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                'Coordinates will be included with your submission',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey.shade600,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-            ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -725,7 +832,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
-      resizeToAvoidBottomInset: true, // This helps with keyboard handling
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 2,
@@ -741,7 +848,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
           ),
         ),
         actions: [
-          if (_textController.text.isNotEmpty)
+          if (_textController.text.isNotEmpty || _titleController.text.isNotEmpty)
             IconButton(
               onPressed: _clearText,
               icon: const Icon(Icons.clear, color: Colors.red),
@@ -759,7 +866,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
                 child: IntrinsicHeight(
                   child: Column(
                     children: [
-                      // Header Info
+                      // Header Info - Matching AudioInputScreen style
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(16),
@@ -769,9 +876,9 @@ class _TextInputScreenState extends State<TextInputScreen> {
                           borderRadius: BorderRadius.circular(12),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.grey.shade200,
-                              blurRadius: 8,
+                              color: Colors.black.withOpacity(0.05),
                               offset: const Offset(0, 2),
+                              blurRadius: 8,
                             ),
                           ],
                         ),
@@ -780,53 +887,49 @@ class _TextInputScreenState extends State<TextInputScreen> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.category,
-                                    color: kPrimaryColor, size: 20),
-                                const SizedBox(width: 8),
-                                Text(
-                                  'Category: $_effectiveCategory',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: kPrimaryColor,
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: kPrimaryColor.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    _effectiveCategory,
+                                    style: const TextStyle(
+                                      color: kPrimaryColor,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 12,
+                                    ),
                                   ),
                                 ),
                                 const Spacer(),
-                                TextButton(
-                                  onPressed: _changeCategory,
-                                  child: const Text('Change'),
-                                ),
+                                _buildLocationStatus(),
                               ],
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 12),
                             Row(
                               children: [
                                 const Icon(Icons.language,
-                                    color: kPrimaryColor, size: 20),
+                                    size: 16, color: Colors.grey),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Language: $_selectedLanguage',
                                   style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: kPrimaryColor,
+                                    color: Colors.grey,
+                                    fontSize: 14,
                                   ),
                                 ),
                                 const Spacer(),
-                                DropdownButton<String>(
-                                  value: _selectedLanguage,
-                                  underline: Container(),
-                                  items: ['Telugu', 'English']
-                                      .map((lang) => DropdownMenuItem(
-                                            value: lang,
-                                            child: Text(lang),
-                                          ))
-                                      .toList(),
-                                  onChanged: (value) {
-                                    if (value != null) {
-                                      setState(() {
-                                        _selectedLanguage = value;
-                                      });
-                                    }
-                                  },
+                                GestureDetector(
+                                  onTap: () => _showLanguageSelector(),
+                                  child: const Icon(
+                                    Icons.edit,
+                                    size: 16,
+                                    color: kPrimaryColor,
+                                  ),
                                 ),
                               ],
                             ),
@@ -837,7 +940,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
                                 child: Row(
                                   children: [
                                     const Icon(Icons.person,
-                                        color: Colors.green, size: 20),
+                                        color: Colors.green, size: 16),
                                     const SizedBox(width: 8),
                                     Text(
                                       'User: ${_userId!.substring(0, 8)}...',
@@ -854,8 +957,57 @@ class _TextInputScreenState extends State<TextInputScreen> {
                         ),
                       ),
 
-                      // Location Card
-                      _buildLocationCard(),
+                      // Title Section - Matching AudioInputScreen style
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              offset: const Offset(0, 2),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: kPrimaryColor.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(
+                                    Icons.title,
+                                    color: kPrimaryColor,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'Text Title',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF2D3748),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            _buildTitleSection(),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
 
                       // Text Input Area - Made flexible instead of Expanded
                       Flexible(
@@ -863,9 +1015,8 @@ class _TextInputScreenState extends State<TextInputScreen> {
                         child: Container(
                           margin: const EdgeInsets.all(16),
                           constraints: const BoxConstraints(
-                            minHeight: 300, // Minimum height for text area
-                            maxHeight:
-                                500, // Maximum height to prevent overflow
+                            minHeight: 200,
+                            maxHeight: 350,
                           ),
                           decoration: BoxDecoration(
                             color: Colors.white,
@@ -917,7 +1068,7 @@ class _TextInputScreenState extends State<TextInputScreen> {
                                   padding: const EdgeInsets.all(16),
                                   child: TextField(
                                     controller: _textController,
-                                    focusNode: _focusNode,
+                                    focusNode: _textFocusNode,
                                     maxLines: null,
                                     expands: true,
                                     textAlignVertical: TextAlignVertical.top,
@@ -1040,7 +1191,9 @@ class _TextInputScreenState extends State<TextInputScreen> {
                               width: double.infinity,
                               height: 50,
                               child: ElevatedButton(
-                                onPressed: _isUploading || _textController.text.trim().isEmpty
+                                onPressed: _isUploading || 
+                                    _textController.text.trim().isEmpty ||
+                                    _titleController.text.trim().isEmpty
                                     ? null
                                     : _handleSubmit,
                                 style: ElevatedButton.styleFrom(
@@ -1091,12 +1244,14 @@ class _TextInputScreenState extends State<TextInputScreen> {
                             ),
                             
                             // Helper text
-                            if (_textController.text.trim().isEmpty)
-                              const Padding(
-                                padding: EdgeInsets.only(top: 8),
+                            if (_textController.text.trim().isEmpty || _titleController.text.trim().isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
                                 child: Text(
-                                  'Enter some text to enable submission',
-                                  style: TextStyle(
+                                  _titleController.text.trim().isEmpty 
+                                      ? 'Enter a title and text to enable submission'
+                                      : 'Enter some text to enable submission',
+                                  style: const TextStyle(
                                     color: Colors.grey,
                                     fontSize: 12,
                                   ),

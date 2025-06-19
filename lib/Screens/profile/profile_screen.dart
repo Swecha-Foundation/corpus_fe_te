@@ -857,34 +857,78 @@ class _ProfileScreenState extends State<ProfileScreen>
               child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
             ),
             ElevatedButton(
-              onPressed: () {
-                if (mounted) {
-                  setState(() {
-                    displayName = nameController.text;
-                    email = emailController.text;
-                  });
-                }
-                Navigator.pop(context);
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text('Profile updated successfully!'),
-                      backgroundColor: kPrimaryColor,
-                      behavior: SnackBarBehavior.floating,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryColor,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+  onPressed: () async {
+    // Close the dialog first
+    Navigator.pop(context);
+    
+    // Show loading indicator
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Row(
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation(Colors.white),
+                ),
               ),
-              child: const Text('Save'),
-            ),
+              SizedBox(width: 16),
+              Text('Logging out...'),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    try {
+      // Force complete logout - this will clear ALL auth data
+      await TokenStorageService.forceLogout();
+      
+      // Additional verification - ensure clearance
+      await TokenStorageService.debugPrintAuthData();
+      
+      // Small delay to ensure data is cleared
+      await Future.delayed(const Duration(milliseconds: 200));
+      
+      // Navigate back to welcome screen and clear all previous routes
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const WelcomeScreen(),
+          ),
+          (Route<dynamic> route) => false,
+        );
+      }
+    } catch (e) {
+      // Handle logout error
+      print('Logout error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Logout failed: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    }
+  },
+  style: ElevatedButton.styleFrom(
+    backgroundColor: Colors.orange,
+    foregroundColor: Colors.white,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  ),
+  child: const Text('Logout'),
+),
+
           ],
         );
       },

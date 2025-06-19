@@ -66,25 +66,46 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   Future<void> _checkAuthStatus() async {
     try {
+      print('Checking authentication status...');
+      
+      // Add a small delay to ensure SharedPreferences is ready
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // Debug: Print current auth data
+      await TokenStorageService.debugPrintAuthData();
+      
       final isAuth = await TokenStorageService.isAuthenticated();
+      print('Authentication result: $isAuth');
       
       if (isAuth) {
         // Get user data if authenticated
         final userData = await TokenStorageService.getUserData();
         _userName = userData['userName'] ?? 'User';
         _phoneNumber = userData['phoneNumber'] ?? '';
+        
+        print('User authenticated: $_userName, $_phoneNumber');
+      } else {
+        print('User not authenticated');
+        // Ensure clean state if not authenticated
+        await TokenStorageService.clearAuthData();
       }
       
-      setState(() {
-        _isAuthenticated = isAuth;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isAuthenticated = isAuth;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      // If there's any error, default to not authenticated
-      setState(() {
-        _isAuthenticated = false;
-        _isLoading = false;
-      });
+      print('Error checking auth status: $e');
+      // If there's any error, default to not authenticated and clear data
+      await TokenStorageService.clearAuthData();
+      if (mounted) {
+        setState(() {
+          _isAuthenticated = false;
+          _isLoading = false;
+        });
+      }
     }
   }
 

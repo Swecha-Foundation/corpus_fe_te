@@ -13,6 +13,7 @@ class TokenStorageService {
   static const String _userNameKey = 'user_name';
   static const String _tokenExpiryKey = 'token_expiry';
   static const String _refreshTokenKey = 'refresh_token';
+  static const String _isLoggedInKey = 'is_logged_in'; // Add explicit login state
 
   // Store authentication data
   static Future<bool> storeAuthData({
@@ -26,9 +27,9 @@ class TokenStorageService {
   }) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      
       await prefs.setString(_tokenKey, token);
       await prefs.setString(_tokenTypeKey, tokenType);
+      await prefs.setBool(_isLoggedInKey, true); // Explicitly set login state
       
       if (userId != null) await prefs.setString(_userIdKey, userId);
       if (phoneNumber != null) await prefs.setString(_phoneNumberKey, phoneNumber);
@@ -41,7 +42,6 @@ class TokenStorageService {
       
       print('Auth data stored successfully');
       print('Token: ${token.substring(0, 20)}...'); // Log partial token for debugging
-      
       return true;
     } catch (e) {
       print('Error storing auth data: $e');
@@ -53,10 +53,22 @@ class TokenStorageService {
   static Future<String?> getAuthToken() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString(_tokenKey);
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
       
+      if (!isLoggedIn) {
+        print('User is not logged in (explicit logout)');
+        return null;
+      }
+      
+      final token = prefs.getString(_tokenKey);
       if (token != null && await isTokenValid()) {
         return token;
+      }
+      
+      // If token is invalid, clear all data
+      if (token != null && !await isTokenValid()) {
+        print('Token expired, clearing auth data');
+        await clearAuthData();
       }
       
       return null;
@@ -70,13 +82,17 @@ class TokenStorageService {
   static Future<String?> getAuthorizationHeader() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      
+      if (!isLoggedIn) {
+        return null;
+      }
+      
       final token = await getAuthToken();
       final tokenType = prefs.getString(_tokenTypeKey) ?? 'bearer';
-      
       if (token != null) {
         return '${tokenType.toLowerCase()} $token';
       }
-      
       return null;
     } catch (e) {
       print('Error getting authorization header: $e');
@@ -89,11 +105,16 @@ class TokenStorageService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final expiryString = prefs.getString(_tokenExpiryKey);
-      
       if (expiryString == null) return false;
       
       final expiryTime = DateTime.parse(expiryString);
-      return DateTime.now().isBefore(expiryTime);
+      final isValid = DateTime.now().isBefore(expiryTime);
+      
+      if (!isValid) {
+        print('Token has expired');
+      }
+      
+      return isValid;
     } catch (e) {
       print('Error checking token validity: $e');
       return false;
@@ -102,15 +123,37 @@ class TokenStorageService {
 
   // Check if user is authenticated
   static Future<bool> isAuthenticated() async {
-    final token = await getAuthToken();
-    return token != null && await isTokenValid();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      
+      if (!isLoggedIn) {
+        print('User explicitly logged out');
+        return false;
+      }
+      
+      final token = await getAuthToken();
+      final isValid = token != null && await isTokenValid();
+      
+      if (!isValid) {
+        print('Authentication failed - clearing data');
+        await clearAuthData();
+        return false;
+      }
+      
+      return isValid;
+    } catch (e) {
+      print('Error checking authentication: $e');
+      return false;
+    }
   }
 
   // Clear all stored authentication tokens and data
-  static Future<bool> clearTokens() async {
+  static Future<bool> clearAuthData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       
+      // Remove all auth-related keys
       await prefs.remove(_tokenKey);
       await prefs.remove(_tokenTypeKey);
       await prefs.remove(_userIdKey);
@@ -118,19 +161,33 @@ class TokenStorageService {
       await prefs.remove(_userNameKey);
       await prefs.remove(_refreshTokenKey);
       await prefs.remove(_tokenExpiryKey);
+      await prefs.setBool(_isLoggedInKey, false); // Explicitly set logged out state
       
-      print('Auth tokens cleared successfully');
+      // Also remove alternative keys for compatibility
+      await prefs.remove('userId');
+      
+      print('Auth data cleared successfully');
+      
+      // Verify clearance
+      final remainingKeys = prefs.getKeys();
+      print('Remaining keys after clearance: $remainingKeys');
+      
       return true;
     } catch (e) {
-      print('Error clearing auth tokens: $e');
+      print('Error clearing auth data: $e');
       return false;
     }
   }
 
   // Get all stored user data
-  static Future<Map<String, String?>> getUserData() async {
+  static Future<Map<String, dynamic>> getUserData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      
+      if (!isLoggedIn) {
+        return {};
+      }
       
       return {
         'token': await getAuthToken(),
@@ -140,6 +197,7 @@ class TokenStorageService {
         'userName': prefs.getString(_userNameKey),
         'refreshToken': prefs.getString(_refreshTokenKey),
         'tokenExpiry': prefs.getString(_tokenExpiryKey),
+        'isLoggedIn': isLoggedIn,
       };
     } catch (e) {
       print('Error getting user data: $e');
@@ -147,9 +205,9 @@ class TokenStorageService {
     }
   }
 
-  // Clear all stored authentication data (alias for clearTokens for backward compatibility)
-  static Future<bool> clearAuthData() async {
-    return await clearTokens();
+  // Clear all stored authentication tokens (alias for backward compatibility)
+  static Future<bool> clearTokens() async {
+    return await clearAuthData();
   }
 
   // Update token expiry time
@@ -168,7 +226,8 @@ class TokenStorageService {
   static Future<String?> getUserId() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_userIdKey);
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      return isLoggedIn ? prefs.getString(_userIdKey) : null;
     } catch (e) {
       print('Error getting user ID: $e');
       return null;
@@ -179,7 +238,8 @@ class TokenStorageService {
   static Future<String?> getPhoneNumber() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_phoneNumberKey);
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      return isLoggedIn ? prefs.getString(_phoneNumberKey) : null;
     } catch (e) {
       print('Error getting phone number: $e');
       return null;
@@ -190,7 +250,8 @@ class TokenStorageService {
   static Future<String?> getUserName() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_userNameKey);
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      return isLoggedIn ? prefs.getString(_userNameKey) : null;
     } catch (e) {
       print('Error getting user name: $e');
       return null;
@@ -201,7 +262,8 @@ class TokenStorageService {
   static Future<String?> getRefreshToken() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      return prefs.getString(_refreshTokenKey);
+      final isLoggedIn = prefs.getBool(_isLoggedInKey) ?? false;
+      return isLoggedIn ? prefs.getString(_refreshTokenKey) : null;
     } catch (e) {
       print('Error getting refresh token: $e');
       return null;
@@ -213,11 +275,9 @@ class TokenStorageService {
     try {
       final prefs = await SharedPreferences.getInstance();
       final expiryString = prefs.getString(_tokenExpiryKey);
-      
       if (expiryString != null) {
         return DateTime.parse(expiryString);
       }
-      
       return null;
     } catch (e) {
       print('Error getting token expiry: $e');
@@ -230,10 +290,8 @@ class TokenStorageService {
     try {
       final expiry = await getTokenExpiry();
       if (expiry == null) return true;
-      
       final now = DateTime.now();
       final expiryThreshold = expiry.subtract(threshold);
-      
       return now.isAfter(expiryThreshold);
     } catch (e) {
       print('Error checking token expiry threshold: $e');
@@ -241,30 +299,11 @@ class TokenStorageService {
     }
   }
 
-  // Refresh token if it's about to expire (placeholder - implement based on your API)
-  static Future<bool> refreshTokenIfNeeded() async {
-    try {
-      if (await willTokenExpireSoon()) {
-        final refreshToken = await getRefreshToken();
-        if (refreshToken != null) {
-          // TODO: Implement actual token refresh logic based on your API
-          print('Token refresh needed but not implemented');
-          return false;
-        }
-      }
-      return true;
-    } catch (e) {
-      print('Error refreshing token: $e');
-      return false;
-    }
-  }
-
-  // Store user ID separately (for compatibility with text_input_screen.dart)
+  // Store user ID separately (for compatibility)
   static Future<bool> storeUserId(String userId) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_userIdKey, userId);
-      // Also store with alternative key for compatibility
       await prefs.setString('userId', userId);
       return true;
     } catch (e) {
@@ -273,7 +312,36 @@ class TokenStorageService {
     }
   }
 
-  // Print stored auth data for debugging
+  // Force logout - completely clear all auth data
+  static Future<bool> forceLogout() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Get all keys and remove any that might be auth-related
+      final allKeys = prefs.getKeys();
+      final authKeys = allKeys.where((key) => 
+        key.contains('auth') || 
+        key.contains('token') || 
+        key.contains('user') || 
+        key.contains('login')
+      ).toList();
+      
+      for (String key in authKeys) {
+        await prefs.remove(key);
+      }
+      
+      // Explicitly set logout state
+      await prefs.setBool(_isLoggedInKey, false);
+      
+      print('Force logout completed - removed ${authKeys.length} keys');
+      return true;
+    } catch (e) {
+      print('Error during force logout: $e');
+      return false;
+    }
+  }
+
+  // Debug print stored auth data
   static Future<void> debugPrintAuthData() async {
     final userData = await getUserData();
     print('=== Stored Auth Data ===');
@@ -285,7 +353,6 @@ class TokenStorageService {
       }
     });
     
-    // Additional debug info
     final isAuth = await isAuthenticated();
     final tokenValid = await isTokenValid();
     final willExpire = await willTokenExpireSoon();

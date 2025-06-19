@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import '../../feedback/feedback_screen.dart';
 import '../../profile/profile_screen.dart';
-import '../../Welcome/welcome_screen.dart';  // Add this import
+import '../../Welcome/welcome_screen.dart'; // Add this import
 import '../../../constants.dart';
+import '../../../services/token_storage_service.dart'; // Add this import
 
 class DashboardDrawer extends StatefulWidget {
   final String userName;
   final String phoneNumber;
-  
+
   const DashboardDrawer({
     Key? key,
     required this.userName,
@@ -18,7 +19,7 @@ class DashboardDrawer extends StatefulWidget {
   State<DashboardDrawer> createState() => _DashboardDrawerState();
 }
 
-class _DashboardDrawerState extends State<DashboardDrawer> 
+class _DashboardDrawerState extends State<DashboardDrawer>
     with TickerProviderStateMixin {
   late AnimationController _slideController;
   late AnimationController _fadeController;
@@ -62,9 +63,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
       duration: const Duration(milliseconds: 600),
       vsync: this,
     );
-    
     selectedMenuItem = 'dashboard';
-    
     _slideController.forward();
     _fadeController.forward();
   }
@@ -78,7 +77,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
 
   void _navigateToScreen(BuildContext context, String screenId) {
     Navigator.pop(context); // Close drawer first
-    
+
     // Navigate to specific screens
     switch (screenId) {
       case 'feedback':
@@ -144,10 +143,14 @@ class _DashboardDrawerState extends State<DashboardDrawer>
 
   IconData _getIconForScreen(String screenName) {
     switch (screenName.toLowerCase()) {
-      case 'recordings': return Icons.mic_rounded;
-      case 'profile': return Icons.person_rounded;
-      case 'feedback': return Icons.feedback_rounded;
-      default: return Icons.arrow_forward_rounded;
+      case 'recordings':
+        return Icons.mic_rounded;
+      case 'profile':
+        return Icons.person_rounded;
+      case 'feedback':
+        return Icons.feedback_rounded;
+      default:
+        return Icons.arrow_forward_rounded;
     }
   }
 
@@ -208,17 +211,70 @@ class _DashboardDrawerState extends State<DashboardDrawer>
               ),
             ),
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 // Close the dialog first
                 Navigator.pop(context);
                 
-                // Navigate back to welcome screen and clear all previous routes
-                Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (context) => const WelcomeScreen(),
-                  ),
-                  (Route<dynamic> route) => false,
-                );
+                // Show loading indicator
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Row(
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation(Colors.white),
+                            ),
+                          ),
+                          SizedBox(width: 16),
+                          Text('Logging out...'),
+                        ],
+                      ),
+                      backgroundColor: Colors.red,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)
+                      ),
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+
+                try {
+                  // Force complete logout - this will clear ALL auth data
+                  await TokenStorageService.forceLogout();
+                  
+                  // Small delay to ensure data is cleared
+                  await Future.delayed(const Duration(milliseconds: 200));
+                  
+                  // Navigate back to welcome screen and clear all previous routes
+                  if (mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const WelcomeScreen(),
+                      ),
+                      (Route<dynamic> route) => false,
+                    );
+                  }
+                } catch (e) {
+                  // Handle logout error
+                  print('Logout error: $e');
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Logout failed: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)
+                        ),
+                      ),
+                    );
+                  }
+                }
               },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -363,7 +419,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                 ),
               ),
             ),
-            
+
             // Enhanced Menu Items
             Expanded(
               child: Container(
@@ -388,7 +444,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                             ),
                           ),
                         );
-                        
+
                         final fadeAnimation = Tween<double>(
                           begin: 0.0,
                           end: 1.0,
@@ -423,7 +479,7 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                 ),
               ),
             ),
-            
+
             // Enhanced User Info Section
             AnimatedBuilder(
               animation: _fadeController,
@@ -590,7 +646,6 @@ class _DashboardDrawerState extends State<DashboardDrawer>
         setState(() {
           selectedMenuItem = item.id;
         });
-        
         if (item.id == 'dashboard') {
           Navigator.pop(context);
         } else {
@@ -602,32 +657,32 @@ class _DashboardDrawerState extends State<DashboardDrawer>
         curve: Curves.easeOutCubic,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          gradient: isActive 
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  // ignore: deprecated_member_use
-                  kPrimaryColor.withOpacity(0.1),
-                  // ignore: deprecated_member_use
-                  kPrimaryColor.withOpacity(0.05),
-                ],
-              )
-            : null,
+          gradient: isActive
+              ? LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    // ignore: deprecated_member_use
+                    kPrimaryColor.withOpacity(0.1),
+                    // ignore: deprecated_member_use
+                    kPrimaryColor.withOpacity(0.05),
+                  ],
+                )
+              : null,
           borderRadius: BorderRadius.circular(16),
-          border: isActive 
-            ? Border.all(color: kPrimaryColor, width: 1)
-            : null,
-          boxShadow: isActive 
-            ? [
-                BoxShadow(
-                  // ignore: deprecated_member_use
-                  color: kPrimaryColor.withOpacity(0.1),
-                  offset: const Offset(0, 4),
-                  blurRadius: 12,
-                ),
-              ]
-            : null,
+          border: isActive
+              ? Border.all(color: kPrimaryColor, width: 1)
+              : null,
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    // ignore: deprecated_member_use
+                    color: kPrimaryColor.withOpacity(0.1),
+                    offset: const Offset(0, 4),
+                    blurRadius: 12,
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           children: [
@@ -639,31 +694,31 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                 color: isActive ? null : Colors.grey.shade100,
                 borderRadius: BorderRadius.circular(12),
                 boxShadow: isActive
-                  ? [
-                      BoxShadow(
-                        // ignore: deprecated_member_use
-                        color: item.gradient.colors.first.withOpacity(0.3),
-                        offset: const Offset(0, 4),
-                        blurRadius: 8,
-                      ),
-                    ]
-                  : null,
+                    ? [
+                        BoxShadow(
+                          // ignore: deprecated_member_use
+                          color: item.gradient.colors.first.withOpacity(0.3),
+                          offset: const Offset(0, 4),
+                          blurRadius: 8,
+                        ),
+                      ]
+                    : null,
               ),
               child: Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
                   gradient: isActive
-                    ? LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          // ignore: deprecated_member_use
-                          Colors.white.withOpacity(0.2),
-                          // ignore: deprecated_member_use
-                          Colors.white.withOpacity(0.0),
-                        ],
-                      )
-                    : null,
+                      ? LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            // ignore: deprecated_member_use
+                            Colors.white.withOpacity(0.2),
+                            // ignore: deprecated_member_use
+                            Colors.white.withOpacity(0.0),
+                          ],
+                        )
+                      : null,
                 ),
                 child: Icon(
                   item.icon,

@@ -244,8 +244,8 @@ class _DashboardDrawerState extends State<DashboardDrawer>
                 }
 
                 try {
-                  // Force complete logout - this will clear ALL auth data
-                  await TokenStorageService.forceLogout();
+                  // Use the same method as profile screen - clearAuthData instead of forceLogout
+                  await TokenStorageService.clearAuthData();
                   
                   // Small delay to ensure data is cleared
                   await Future.delayed(const Duration(milliseconds: 200));

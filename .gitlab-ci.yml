@@ -1,0 +1,227 @@
+# To contribute improvements to CI/CD, please follow the Development guide at:
+# https://docs.gitlab.com/ee/development/cicd/templates.html
+
+# Flutter Docker image for building the application
+image: 
+  name: ghcr.io/cirruslabs/flutter:stable
+
+# Cache configuration to reduce build times
+cache:
+  paths:
+    - $CI_PROJECT_DIR/.pub-cache/
+
+workflow:
+  name: 'Manual Release - $RELEASE_TAG'
+  rules:
+    # Manual trigger only - remove automatic triggers
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+      when: always
+    - when: never
+
+# Stages of the pipeline
+stages:
+  - build
+  - bundle
+  - release
+
+variables:
+  # Android SDK configuration
+  ANDROID_COMPILE_SDK: "31"
+  ANDROID_BUILD_TOOLS: "30.0.3"
+  ANDROID_SDK_TOOLS: "9477386"
+  FLUTTER_HOME: "/usr/local/flutter"
+  CI_PROJECT_ID: "59781616"
+  TARGET_BRANCH: "Version1.0.1-for-build"
+  VERSION_CODE: "123"  # Default version code, can be overridden
+  RELEASE_TAG: "1.1.0"  # Default release tag, can be overwridden
+
+  # Add these signing variables - set them in GitLab CI/CD variables
+  # KEYSTORE_PASSWORD: (set in GitLab CI/CD variables)
+  # KEY_PASSWORD: (set in GitLab CI/CD variables) 
+  # KEYSTORE_ALIAS: (set in GitLab CI/CD variables, e.g., "upload" or "key0")
+  # CI_TOKEN: (set in GitLab CI/CD variables - your personal access token)
+
+# Manual input variables (configured in GitLab UI when running manually)
+# These will be available as CI/CD variables:
+# - TARGET_BRANCH: The branch to build from
+# - VERSION_CODE: Numeric version code (e.g., 123)
+# - RELEASE_TAG: Version tag in x.y.z format (e.g., 1.0.5)
+
+Build:
+  interruptible: true
+  stage: build
+  before_script:
+    # Checkout the specified branch
+    - git checkout $TARGET_BRANCH
+    - git pull origin $TARGET_BRANCH
+    
+    # Setup Android SDK
+    - apt-get --quiet update --yes
+    - apt-get --quiet install --yes wget unzip
+    - export ANDROID_HOME="${PWD}/android-sdk-root"
+    - install -d $ANDROID_HOME
+    - wget --no-verbose --output-document=$ANDROID_HOME/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_SDK_TOOLS}_latest.zip
+    - unzip -q -d "$ANDROID_HOME/cmdline-tools" "$ANDROID_HOME/cmdline-tools.zip"
+    - mv -T "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/tools"
+    - export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/tools/bin
+    - yes | sdkmanager --licenses > /dev/null || true
+    - sdkmanager "platforms;android-${ANDROID_COMPILE_SDK}"
+    - sdkmanager "platform-tools"
+    - sdkmanager "build-tools;${ANDROID_BUILD_TOOLS}"
+    
+    # Download secure files
+    - curl -s https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer | bash
+    - cp $CI_PROJECT_DIR/.secure_files/telugu_corpus.jks android/app/telugu_corpus.jks
+    
+    # Create key.properties file for bundle stage too
+    - echo "storePassword=$KEYSTORE_PASSWORD" > android/key.properties
+    - echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
+    - echo "keyAlias=$KEYSTORE_ALIAS" >> android/key.properties
+    - echo "storeFile=telugu_corpus.jks" >> android/key.properties
+    
+    # Verify keystore file exists and show its info
+    - ls -la android/app/telugu_corpus.jks
+    - echo "Keystore certificate fingerprint:"
+    - keytool -list -v -keystore android/app/telugu_corpus.jks -alias upload -storepass $KEYSTORE_PASSWORD | grep -A1 -B1 "SHA1\|SHA256" || echo "Could not read keystore - check alias and password"
+    
+    # Create or verify key.properties file
+    - echo "Creating key.properties file..."
+    - echo "storePassword=$KEYSTORE_PASSWORD" > android/key.properties
+    - echo "keyPassword=$KEY_PASSWORD" >> android/key.properties
+    - echo "keyAlias=$KEYSTORE_ALIAS" >> android/key.properties
+    - echo "storeFile=telugu_corpus.jks" >> android/key.properties
+    - echo "key.properties content:"
+    - cat android/key.properties
+    
+    # Verify keystore exists and check certificate fingerprint
+    - ls -la android/app/telugu_corpus.jks
+    - keytool -list -v -keystore android/app/telugu_corpus.jks -alias $KEYSTORE_ALIAS -storepass $KEYSTORE_PASSWORD | grep -E "(SHA1|SHA256)" || echo "Could not verify certificate fingerprint"
+
+  script:
+    # Setup Flutter environment
+    - export PUB_CACHE=$CI_PROJECT_DIR/.pub-cache
+    - export PATH="$PATH":"$PUB_CACHE/bin"
+    - flutter doctor -v
+    - flutter --version
+    - dart --version
+    
+    # Check pubspec.yaml for compatibility issues
+    - echo "Checking pubspec.yaml dependencies..."
+    - cat pubspec.yaml | grep -A 5 -B 5 flutter_lints || echo "flutter_lints not found in pubspec.yaml"
+    
+    - flutter pub get
+    - flutter pub upgrade
+    
+    # Build APK with custom version code
+    - flutter build apk --build-number="$VERSION_CODE" --build-name="$RELEASE_TAG" --release
+    
+  artifacts:
+    paths:
+      - build/app/outputs/flutter-apk/
+    name: "build_${RELEASE_TAG}_${VERSION_CODE}"
+  after_script:
+    - echo BUILD_ARTIFACT_URL=$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/download >> variables.env
+
+bundle:
+  interruptible: true
+  stage: bundle
+  before_script:
+    # Checkout the specified branch
+    - git checkout $TARGET_BRANCH
+    - git pull origin $TARGET_BRANCH
+    
+    # Download secure files
+    - curl -s https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer | bash
+    - cp $CI_PROJECT_DIR/.secure_files/telugu_corpus.jks android/app/telugu_corpus.jks
+    
+  script:
+    - export PUB_CACHE=$CI_PROJECT_DIR/.pub-cache
+    - export PATH="$PATH":"$PUB_CACHE/bin"
+    
+    # Build App Bundle with custom version code and name
+    - flutter build appbundle --build-number="$VERSION_CODE" --build-name="$RELEASE_TAG" --release   
+    
+    # Verify App Bundle signing
+    - echo "Verifying App Bundle signature:"
+    - jarsigner -verify -verbose build/app/outputs/bundle/release/app-release.aab || echo "App Bundle verification failed"
+    
+    # Show certificate details from the built AAB
+    - echo "Certificate details from built AAB:"
+    - unzip -l build/app/outputs/bundle/release/app-release.aab | grep -E "META-INF.*\.(RSA|DSA|EC)" || echo "No certificate files found"   
+    
+    # Verify the built AAB is signed correctly
+    - echo "Verifying App Bundle signature..."
+    - apksigner verify build/app/outputs/bundle/release/app-release.aab || echo "App Bundle verification failed"
+    
+    # Extract and show certificate info from the built AAB
+    - unzip -l build/app/outputs/bundle/release/app-release.aab | grep -E "(META-INF|\.RSA|\.SF)" || echo "No signing files found"   
+
+  artifacts:
+    paths:
+      - build/app/outputs/bundle/release/
+    name: "bundle_${RELEASE_TAG}_${VERSION_CODE}"
+  after_script:
+    - echo BUNDLE_ARTIFACT_URL=$CI_PROJECT_URL/-/jobs/$CI_JOB_ID/artifacts/download >> variables.env
+
+release:
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  stage: release
+  before_script:
+    # Install required packages
+    - apk add --no-cache git curl
+    
+    # Configure Git with authentication using CI_TOKEN
+    - git config --global user.email "ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+    
+    # Set up authenticated remote URL using CI_TOKEN
+    - git remote set-url origin "https://shashikanth171:${CI_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    
+    # Checkout the specified branch
+    - git checkout $TARGET_BRANCH
+    - git pull origin $TARGET_BRANCH
+    
+    # Verify authentication works
+    - git remote -v
+    
+  script:
+    - echo "Creating release for version $RELEASE_TAG from branch $TARGET_BRANCH"
+    
+    # Check if tag already exists
+    - |
+      if git rev-parse "v$RELEASE_TAG" >/dev/null 2>&1; then
+        echo "Tag v$RELEASE_TAG already exists, skipping tag creation"
+      else
+        echo "Creating new tag v$RELEASE_TAG"
+        git tag -a "v$RELEASE_TAG" -m "Release version $RELEASE_TAG (build $VERSION_CODE)"
+        git push origin "v$RELEASE_TAG"
+      fi
+    
+  release:
+    tag_name: "v$RELEASE_TAG"
+    name: "Release v$RELEASE_TAG"
+    description: |
+      Release v$RELEASE_TAG built from branch $TARGET_BRANCH
+      
+      **Build Details:**
+      - Version: $RELEASE_TAG
+      - Build Number: $VERSION_CODE
+      - Source Branch: $TARGET_BRANCH
+      - Built on: $CI_COMMIT_TIMESTAMP
+      - Commit: $CI_COMMIT_SHA
+      
+      **Downloads:**
+      Download the artifacts from the individual job pages:
+      - APK: Check the Build job artifacts
+      - App Bundle: Check the Bundle job artifacts
+      
+    assets:
+      links:
+        - name: "Download APK"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_REF_NAME/download?job=Build"
+        - name: "Download App Bundle"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_REF_NAME/download?job=bundle"
+      
+  dependencies:
+    - Build
+    - bundle

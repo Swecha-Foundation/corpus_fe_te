@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contributions Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        
+        #map {
+            flex-grow: 1;
+            width: 100%;
+            border: 1px solid #ccc;
+            min-height: 60vh;
+        }
+        
+        .info-box {
+            background-color: #f9f9f9;
+            border-top: 1px solid #ddd;
+            padding: 5px 10px;
+            margin-top: auto;
+            width: 100%;
+            text-align: center;
+            font-size: 0.8em;
+            color: #666;
+            box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.05);
+        }
+        /* Carousel specific styles */
+        
+        .image-carousel-container {
+            position: relative;
+            width: 200px;
+            height: 150px;
+            overflow: hidden;
+            margin: 10px auto;
+            border: 1px solid #eee;
+            background-color: #fdfdfd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .carousel-image {
+            max-width: 100%;
+            max-height: 100%;
+            display: none;
+            object-fit: contain;
+        }
+        
+        .carousel-image.active {
+            display: block;
+        }
+        
+        .carousel-nav-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 1.2em;
+            z-index: 10;
+            border-radius: 3px;
+        }
+        
+        .carousel-nav-btn:hover {
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+        
+        .carousel-nav-btn.left {
+            left: 5px;
+        }
+        
+        .carousel-nav-btn.right {
+            right: 5px;
+        }
+        /* Style for directly displayed media from file_url */
+        
+        .popup-media {
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin-top: 10px;
+        }
+        /* Custom styles for popup headings */
+        
+        .popup-main-heading {
+            color: green;
+            /* Existing Location: will be green */
+            font-weight: bold;
+        }
+        
+        .popup-subheading {
+            font-weight: bold;
+            color: black;
+        }
+        
+        .potential-main-heading {
+            color: red;
+            /* Potential Location: will be red */
+            font-weight: bold;
+        }
+        /* Dashboard styles */
+        
+        .dashboard {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            font-family: sans-serif;
+            font-size: 0.9em;
+            width: 200px;
+            /* Adjust width as needed */
+        }
+        
+        .dashboard h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 1.1em;
+        }
+        
+        .dashboard label {
+            display: block;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+        
+        .dashboard label input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        
+        .dashboard p {
+            margin: 5px 0;
+            font-size: 0.85em;
+            color: #555;
+        }
+        
+        .dashboard .info-text {
+            font-size: 0.75em;
+            color: #777;
+            margin-top: 15px;
+            border-top: 1px solid #eee;
+            padding-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="map"></div>
+
+    <div class="dashboard">
+        <h3>Contributions Dashboard</h3>
+        <label>
+            <input type="checkbox" id="showExisting" checked /> Show Existing
+        </label>
+        <label>
+            <input type="checkbox" id="showPotential" checked /> Show Potential
+        </label>
+        <p>Total Existing: <span id="totalExistingCount">0</span></p>
+        <p>Total Potential: <span id="totalPotentialCount">0</span></p>
+        <p class="info-text">Hover over a marker to see the name. Red locations are fetched using reverse geocoding.</p>
+    </div>
+
+    <div class="info-box">
+        <p><strong>Green:</strong> Existing contributions. <strong>Red:</strong> Potential contribution areas. (Dummy Data)</p>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="data.js"></script>
+    <script>
+        const map = L.map('map').setView([21.0, 78.0], 5);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Separate layer groups for existing and potential markers for easy toggling
+        const existingMarkerLayerGroup = L.layerGroup().addTo(map);
+        const potentialMarkerLayerGroup = L.layerGroup().addTo(map);
+
+        // Get dashboard elements
+        const showExistingCheckbox = document.getElementById('showExisting');
+        const showPotentialCheckbox = document.getElementById('showPotential');
+        const totalExistingCountSpan = document.getElementById('totalExistingCount');
+        const totalPotentialCountSpan = document.getElementById('totalPotentialCount');
+
+        // Green icon for existing contributions
+        const greenIcon = L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+            iconSize: [12, 20],
+            iconAnchor: [6, 20],
+            popupAnchor: [0, -20]
+        });
+
+        // Reverse geocoding function
+        async function getPlaceName(lat, lon) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}`;
+            try {
+                const response = await fetch(url, {
+                    headers: {
+                        'User-Agent': 'MyMapViewer/1.0 (your-email@example.com)' // IMPORTANT: Replace with your actual email
+                    }
+                });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const data = await response.json();
+                return data.display_name || `Unknown (Lat: ${lat}, Lon: ${lon})`;
+            } catch (err) {
+                console.error("Geocoding error:", err);
+                return `Error: ${err.message}`;
+            }
+        }
+
+        // Function to create structured popup content for existing markers
+        function createExistingPopupContent(data, placeName) {
+            let content = `<span class="popup-main-heading">Existing Location:</span><br>`;
+
+            // Address/Place Name
+            if (placeName) {
+                content += `<span class="popup-subheading">Address:</span> ${placeName}`;
+            } else if (data.title) {
+                content += `<span class="popup-subheading">Title:</span> ${data.title}`;
+            } else if (data.name) {
+                content += `<span class="popup-subheading">Name:</span> ${data.name}`;
+            } else {
+                content += `<span class="popup-subheading">Coordinates:</span> Lat: ${data.lat}, Lon: ${data.lon}`;
+            }
+
+            if (data.user) content += ` (by ${data.user})`;
+            if (data.category) content += `<br><span class="popup-subheading">Category:</span> ${data.category}`;
+            if (data.description) content += `<br><span class="popup-subheading">Description:</span> ${data.description}`;
+
+            // Add carousel or file_url media
+            if (data.id === 'ex1') {
+                content += `
+                    <div class="image-carousel-container">
+                        <img class="carousel-image" src="pic1.jpg" alt="Charminar Photo 1">
+                        <img class="carousel-image" src="pic2.jpg" alt="Charminar Photo 2">
+                        <button class="carousel-nav-btn left">&lt;</button>
+                        <button class="carousel-nav-btn right">&gt;</button>
+                    </div>
+                `;
+            } else if (data.file_url) {
+                if (data.category === 'Image' || data.file_url.match(/\.(jpeg|jpg|gif|png|webp)$/i)) {
+                    content += `<br><img class="popup-media" src="${data.file_url}" alt="Contribution Media">`;
+                } else if (data.category === 'Audio' || data.file_url.match(/\.(mp3|wav|ogg)$/i)) {
+                    content += `<br><audio class="popup-media" controls src="${data.file_url}"></audio>`;
+                } else if (data.category === 'Video' || data.file_url.match(/\.(mp4|webm|ogg)$/i)) {
+                    content += `<br><video class="popup-media" controls src="${data.file_url}"></video>`;
+                } else {
+                    content += `<br>Media: <a href="${data.file_url}" target="_blank">View File</a>`;
+                }
+            }
+            return content;
+        }
+
+        // Function to create structured popup content for potential markers
+        function createPotentialPopupContent(data, placeName) {
+            let content = `<span class="potential-main-heading">Potential Location:</span><br>`;
+
+            // Display the 'College Name:' subheading and the actual name in normal font
+            let collegeName = data.name || data.title; // Prefer 'name' if available, otherwise 'title'
+            if (collegeName) {
+                content += `<span class="popup-subheading">College Name:</span> ${collegeName}<br>`;
+            } else {
+                content += `<span class="popup-subheading">College Name:</span> Not provided<br>`; // Fallback if neither name nor title is present
+            }
+
+            // Display fetched address as another bold black subheading
+            content += `<span class="popup-subheading">Address:</span> ${placeName}`;
+
+            return content;
+        }
+
+
+        let existingCount = 0;
+        // Add existing contribution markers (green)
+        if (typeof existingContributions !== 'undefined') {
+            existingContributions.forEach(data => {
+                const marker = L.marker([data.lat, data.lon], {
+                    icon: greenIcon
+                }).addTo(existingMarkerLayerGroup);
+                existingCount++;
+
+                let initialPlaceName = null;
+                // If title or name is provided, use it initially, otherwise indicate fetching
+                if (data.title) {
+                    initialPlaceName = data.title;
+                } else if (data.name) {
+                    initialPlaceName = data.name;
+                }
+
+                // Bind initial popup content
+                marker.bindPopup(createExistingPopupContent(data, initialPlaceName || 'Fetching place name...'));
+
+                // Handle asynchronous name fetching AND carousel logic on popupopen
+                marker.on('popupopen', async function(e) {
+                    const popup = e.popup.getElement();
+
+                    let finalPlaceName = initialPlaceName;
+                    // Fetch place name if title/name wasn't provided or if it was just "Fetching..."
+                    if (!data.title && !data.name) {
+                        finalPlaceName = await getPlaceName(data.lat, data.lon);
+                        // Update popup content with fetched name
+                        this.setPopupContent(createExistingPopupContent(data, finalPlaceName));
+                    }
+
+
+                    // --- Handle Carousel Logic ---
+                    // This needs to run AFTER any potential setPopupContent,
+                    // as setPopupContent replaces the entire popup HTML.
+                    // So, if content was dynamically updated, we need to re-query for carouselContainer.
+                    const currentPopupCarouselContainer = popup.querySelector('.image-carousel-container');
+
+                    if (currentPopupCarouselContainer) {
+                        const images = currentPopupCarouselContainer.querySelectorAll('.carousel-image');
+                        const leftBtn = currentPopupCarouselContainer.querySelector('.carousel-nav-btn.left');
+                        const rightBtn = currentPopupCarouselContainer.querySelector('.carousel-nav-btn.right');
+                        let currentImageIndex = 0;
+
+                        function showImage(index) {
+                            images.forEach((img, i) => {
+                                img.classList.toggle('active', i === index);
+                            });
+                        }
+
+                        if (images.length > 0) {
+                            showImage(currentImageIndex);
+                        }
+
+                        leftBtn.addEventListener('click', () => {
+                            currentImageIndex = (currentImageIndex - 1 + images.length) % images.length;
+                            showImage(currentImageIndex);
+                        });
+
+                        rightBtn.addEventListener('click', () => {
+                            currentImageIndex = (currentImageIndex + 1) % images.length;
+                            showImage(currentImageIndex);
+                        });
+                    }
+                });
+            });
+        }
+        totalExistingCountSpan.textContent = existingCount; // Update existing count
+
+        let potentialCount = 0;
+        // Add potential contribution markers (red)
+        if (typeof potentialContributionAreas !== 'undefined') {
+            potentialContributionAreas.forEach(data => {
+                if (typeof data.lat === 'number' && typeof data.lon === 'number' && !isNaN(data.lat) && !isNaN(data.lon)) {
+                    const marker = L.circleMarker([data.lat, data.lon], {
+                        radius: 7,
+                        fillColor: 'red',
+                        color: 'white',
+                        weight: 1.5,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    }).addTo(potentialMarkerLayerGroup); // Add to potential layer group
+                    potentialCount++;
+
+                    // Initial popup content for potential locations
+                    marker.bindPopup(createPotentialPopupContent(data, 'Fetching address...'));
+
+                    marker.on('popupopen', async function() {
+                        const placeName = await getPlaceName(data.lat, data.lon);
+                        this.setPopupContent(createPotentialPopupContent(data, placeName));
+                    });
+                } else {
+                    console.warn("Skipping potential contribution marker due to invalid coordinates:", data);
+                }
+            });
+        }
+        totalPotentialCountSpan.textContent = potentialCount; // Update potential count
+
+        // Dashboard Checkbox Event Listeners
+        showExistingCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                map.addLayer(existingMarkerLayerGroup);
+            } else {
+                map.removeLayer(existingMarkerLayerGroup);
+            }
+        });
+
+        showPotentialCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                map.addLayer(potentialMarkerLayerGroup);
+            } else {
+                map.removeLayer(potentialMarkerLayerGroup);
+            }
+        });
+    </script>
+</body>
+
+</html>

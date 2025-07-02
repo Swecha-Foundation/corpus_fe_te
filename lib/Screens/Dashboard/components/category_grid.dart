@@ -1,213 +1,175 @@
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
-import '../../../constants.dart';
-import '../../../responsive.dart'; // Make sure you have your Responsive helper
-import '../../../services/category_api_service.dart'; // Import your API helper
+import '../../../constants.dart'; // Make sure you have your constants file
+
+/// A data class for holding category information including display colors and an icon.
+class CategoryInfo {
+  final String apiName; // A unique identifier for the category
+  final String englishName;
+  final String englishDescription;
+  final String teluguName;
+  final String teluguDescription;
+  final List<Color> gradientColors; // Colors for the background gradient
+  final IconData icon; // The display icon for the category
+
+  CategoryInfo({
+    required this.apiName,
+    required this.englishName,
+    required this.englishDescription,
+    required this.teluguName,
+    required this.teluguDescription,
+    required this.gradientColors,
+    required this.icon,
+  });
+}
 
 class CategoryGrid extends StatefulWidget {
   final String? selectedCategory;
   final Function(String?)? onCategorySelected;
-  final bool isEnglish; // Add language state
+  final bool isEnglish;
 
   const CategoryGrid({
     Key? key,
     this.selectedCategory,
     this.onCategorySelected,
-    required this.isEnglish, // Require language state
+    required this.isEnglish,
   }) : super(key: key);
 
   @override
   State<CategoryGrid> createState() => _CategoryGridState();
 }
 
-class _CategoryGridState extends State<CategoryGrid>
-    with TickerProviderStateMixin {
-  late AnimationController _animationController;
-  List<CategoryItem> categories = [];
-  bool isLoading = true;
-  String? errorMessage;
-
-  // Map of category names to their icons and gradients
-  final Map<String, Map<String, dynamic>> categoryMapping = {
-    'fables': {'icon': '📚', 'gradient': [const Color(0xFF667eea), const Color(0xFF764ba2)]},
-    'events': {'icon': '🎉', 'gradient': [const Color(0xFFf093fb), const Color(0xFFf5576c)]},
-    'music': {'icon': '🎵', 'gradient': [const Color(0xFF4facfe), const Color(0xFF00f2fe)]},
-    'places': {'icon': '📍', 'gradient': [const Color(0xFF43e97b), const Color(0xFF38f9d7)]},
-    'food': {'icon': '🍕', 'gradient': [const Color(0xFFfa709a), const Color(0xFFfee140)]},
-    'people': {'icon': '👥', 'gradient': [const Color(0xFFa8edea), const Color(0xFFfed6e3)]},
-    'literature': {'icon': '📖', 'gradient': [const Color(0xFFffecd2), const Color(0xFFfcb69f)]},
-    'architecture': {'icon': '🏛️', 'gradient': [const Color(0xFFa18cd1), const Color(0xFFfbc2eb)]},
-    'skills': {'icon': '🎯', 'gradient': [const Color(0xFF6a11cb), const Color(0xFF2575fc)]},
-    'images': {'icon': '🖼️', 'gradient': [const Color(0xFFfad0c4), const Color(0xFFfad0c4)]},
-    'culture': {'icon': '🎭', 'gradient': [const Color(0xFFa1c4fd), const Color(0xFFc2e9fb)]},
-    'flora_&_fauna': {'icon': '🌸', 'gradient': [const Color(0xFFffecd2), const Color(0xFFfcb69f)]},
-    'education': {'icon': '🎓', 'gradient': [const Color(0xFF89f7fe), const Color(0xFF66a6ff)]},
-    'vegetation': {'icon': '🌿', 'gradient': [const Color(0xFF85ffbd), const Color(0xFFfffb7d)]},
-  };
-
-  // Map for Telugu translations
-  final Map<String, String> _categoryTitleMapping = {
-    'fables': 'కథలు',
-    'events': 'సంఘటనలు',
-    'music': 'సంగీతం',
-    'places': 'ప్రదేశాలు',
-    'food': 'ఆహారం',
-    'people': 'ప్రజలు',
-    'literature': 'సాహిత్యం',
-    'architecture': 'వాస్తుశిల్పం',
-    'skills': 'నైపుణ్యాలు',
-    'images': 'చిత్రాలు',
-    'culture': 'సంస్కృతి',
-    'flora_&_fauna': 'వృక్షజాలం & జంతుజాలం',
-    'education': 'విద్య',
-    'vegetation': 'వృక్షసంపద',
-  };
-
-
-  @override
-  void initState() {
-    super.initState();
-    _animationController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    );
-    _fetchCategories();
-  }
-  
-  @override
-  void didUpdateWidget(covariant CategoryGrid oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Refetch categories if the language changes
-    if (widget.isEnglish != oldWidget.isEnglish) {
-      _fetchCategories();
-    }
-  }
-
-  Future<void> _fetchCategories() async {
-    if (!mounted) return;
-    setState(() {
-      isLoading = true;
-      errorMessage = null;
-    });
-
-    try {
-      final result = await ApiHelper.getCategories();
-
-      if (result['success']) {
-        final List<dynamic> categoriesData = result['data'];
-
-        setState(() {
-          categories = categoriesData.map((categoryData) {
-            final String name = categoryData['name'] ?? '';
-            // Get the English title from the API
-            final String englishTitle = categoryData['title'] ?? name;
-            // Determine the title based on the selected language
-            final String title = widget.isEnglish
-                ? englishTitle
-                : (_categoryTitleMapping[name] ?? englishTitle);
-
-            final mapping = categoryMapping[name] ??
-                {
-                  'icon': '📋',
-                  'gradient': [
-                    const Color(0xFF667eea),
-                    const Color(0xFF764ba2)
-                  ]
-                };
-            return CategoryItem(
-              icon: mapping['icon'],
-              title: title,
-              apiName: englishTitle, // Store the original English name for selection logic
-              gradient: _createGradient(mapping['gradient']),
-            );
-          }).toList();
-          isLoading = false;
-          errorMessage = null;
-        });
-        _animationController.forward(from: 0.0);
-      } else {
-        setState(() {
-          isLoading = false;
-          errorMessage = result['message'] ?? 'Failed to load categories';
-        });
-      }
-    } catch (e) {
-      setState(() {
-        isLoading = false;
-        errorMessage = 'An error occurred while loading categories';
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _animationController.dispose();
-    super.dispose();
-  }
+class _CategoryGridState extends State<CategoryGrid> {
+  // Static list of categories with descriptions, unique colors, and icons.
+  final List<CategoryInfo> _categories = [
+    CategoryInfo(
+      apiName: 'folk_tales',
+      englishName: 'Folk Tales',
+      englishDescription: 'Stories passed orally across generations',
+      teluguName: 'జానపద కథలు',
+      teluguDescription: 'తరతరాలుగా చెప్పబడుతున్న కథలు',
+      gradientColors: [const Color(0xFF667eea), const Color(0xFF764ba2)],
+      icon: Icons.auto_stories_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'folk_songs',
+      englishName: 'Folk Songs',
+      englishDescription:
+          'Documenting traditional music reflecting the cultural heritage of the region',
+      teluguName: 'జానపద పాటలు',
+      teluguDescription:
+          'ప్రాంతం యొక్క సాంస్కృతిక వారసత్వాన్ని ప్రతిబింబించే సాంప్రదాయ సంగీతాన్ని నమోదు చేయడం',
+      gradientColors: [const Color(0xFF4facfe), const Color(0xFF00f2fe)],
+      icon: Icons.music_note_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'traditional_skills',
+      englishName: 'Traditional Skills',
+      englishDescription:
+          'Gathering data on local artisanal and craft practices (e.g., weaving, pottery)',
+      teluguName: 'సాంప్రదాయ నైపుణ్యాలు',
+      teluguDescription:
+          'స్థానిక చేతివృత్తులు మరియు నైపుణ్యాల (ఉదా., నేత, కుండలు) పై డేటాను సేకరించడం',
+      gradientColors: [const Color(0xFF43e97b), const Color(0xFF38f9d7)],
+      icon: Icons.handyman_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'local_cultural_history',
+      englishName: 'Local Cultural History',
+      englishDescription:
+          'Collecting data on cultural events, rituals, and customs that define the local communities',
+      teluguName: 'స్థానిక సాంస్కృతిక చరిత్ర',
+      teluguDescription:
+          'స్థానిక సంఘాలను నిర్వచించే సాంస్కృతిక కార్యక్రమాలు, ఆచారాలు మరియు సంప్రదాయాలపై డేటాను సేకరించడం',
+      gradientColors: [const Color(0xFFf093fb), const Color(0xFFf5576c)],
+      icon: Icons.groups_2_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'local_history',
+      englishName: 'Local History',
+      englishDescription:
+          'Compiling historical events and figures significant to your region',
+      teluguName: 'స్థానిక చరిత్ర',
+      teluguDescription:
+          'మీ ప్రాంతానికి ముఖ్యమైన చారిత్రక సంఘటనలు మరియు వ్యక్తులను సంకలనం చేయడం',
+      gradientColors: [const Color(0xFFa18cd1), const Color(0xFFfbc2eb)],
+      icon: Icons.account_balance_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'food_agriculture',
+      englishName: 'Food & Agriculture',
+      englishDescription:
+          'Documenting traditional recipes and cooking methods, along with their cultural significance. Include recipes, tools, practices',
+      teluguName: 'ఆహారం & వ్యవసాయం',
+      teluguDescription:
+          'సాంప్రదాయ వంటకాలు మరియు వంట పద్ధతులను, వాటి సాంస్కృతిక ప్రాముఖ్యతతో పాటు నమోదు చేయడం. వంటకాలు, ఉపకరణాలు, పద్ధతులను చేర్చండి',
+      gradientColors: [const Color(0xFFfa709a), const Color(0xFFfee140)],
+      icon: Icons.agriculture_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'newspapers_pre_1980',
+      englishName: 'Newspapers older than 1980s',
+      englishDescription:
+          'From libraries or archives, scanned or physical copies',
+      teluguName: '1980ల కంటే పాత వార్తాపత్రికలు',
+      teluguDescription:
+          'గ్రంథాలయాలు లేదా ఆర్కైవ్‌ల నుండి, స్కాన్ చేయబడిన లేదా భౌతిక కాపీలు',
+      gradientColors: [const Color(0xFFa8edea), const Color(0xFFfed6e3)],
+      icon: Icons.newspaper_outlined,
+    ),
+    CategoryInfo(
+      apiName: 'flora_fauna',
+      englishName: 'Flora & Fauna',
+      englishDescription:
+          'Document significant plants, trees, animals, and birds native to your region',
+      teluguName: 'వృక్షజాలం & జంతుజాలం',
+      teluguDescription:
+          'మీ ప్రాంతానికి చెందిన ముఖ్యమైన మొక్కలు, చెట్లు, జంతువులు మరియు పక్షులను నమోదు చేయండి',
+      gradientColors: [const Color(0xFF85ffbd), const Color(0xFFfffb7d)],
+      icon: Icons.forest_outlined,
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.grey.shade50, // Lighter background for the whole widget
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            offset: const Offset(0, 10),
-            blurRadius: 30,
-          ),
-        ],
       ),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Header
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      kPrimaryColor.withOpacity(0.1),
-                      kPrimaryColor.withOpacity(0.05)
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  widget.isEnglish ? '✨ Categories' : '✨ వర్గాలు', // Localized header
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: kPrimaryColor,
-                  ),
-                ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  kPrimaryColor.withOpacity(0.1),
+                  kPrimaryColor.withOpacity(0.05)
+                ],
               ),
-            ],
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              widget.isEnglish ? '✨ Categories' : '✨ వర్గాలు',
+              style: const TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: kPrimaryColor,
+              ),
+            ),
           ),
           const SizedBox(height: 20),
-
-          // Conditional content based on state
-          if (isLoading)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(40.0),
-                child: CircularProgressIndicator(color: kPrimaryColor),
-              ),
-            )
-          else if (errorMessage != null)
-            _buildErrorState()
-          else
-            _buildResponsiveGrid(), // Use the new responsive grid builder
+          _buildResponsiveGrid(),
         ],
       ),
     );
   }
-  
+
   /// Builds the responsive grid using LayoutBuilder.
   Widget _buildResponsiveGrid() {
     return LayoutBuilder(
@@ -215,162 +177,115 @@ class _CategoryGridState extends State<CategoryGrid>
         // Determine the number of columns based on the available width.
         final int crossAxisCount;
         if (constraints.maxWidth > 1200) {
-          crossAxisCount = 6; // For large desktops
-        } else if (constraints.maxWidth > 900) {
-          crossAxisCount = 5; // For desktops
-        } else if (constraints.maxWidth > 600) {
-          crossAxisCount = 4; // For tablets
-        } else if (constraints.maxWidth > 400) {
-          crossAxisCount = 3; // For large phones
+          crossAxisCount = 4; // For large desktops
+        } else if (constraints.maxWidth > 800) {
+          crossAxisCount = 3; // For desktops/tablets
+        } else if (constraints.maxWidth > 550) {
+          crossAxisCount = 2; // For large phones
         } else {
-          crossAxisCount = 2; // For small phones
+          crossAxisCount = 1; // For small phones
         }
 
         return GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount, // Dynamically set column count
+            crossAxisCount: crossAxisCount,
             crossAxisSpacing: 16,
             mainAxisSpacing: 16,
-            childAspectRatio: 0.95, // Adjusted for better look
+            childAspectRatio: 2.5, // Adjusted for new layout
           ),
-          itemCount: categories.length,
+          itemCount: _categories.length,
           itemBuilder: (context, index) {
-            // Animation for each grid item
-            return AnimatedBuilder(
-              animation: _animationController,
-              builder: (context, child) {
-                final animationDelay = (index * 0.05).clamp(0.0, 1.0);
-                final slideAnimation = Tween<Offset>(
-                  begin: const Offset(0, 0.5),
-                  end: Offset.zero,
-                ).animate(CurvedAnimation(
-                  parent: _animationController,
-                  curve: Interval(animationDelay, 1.0, curve: Curves.easeOutCubic),
-                ));
-                final fadeAnimation = Tween<double>(
-                  begin: 0.0,
-                  end: 1.0,
-                ).animate(CurvedAnimation(
-                  parent: _animationController,
-                  curve: Interval(animationDelay, 1.0, curve: Curves.easeOut),
-                ));
-
-                return SlideTransition(
-                  position: slideAnimation,
-                  child: FadeTransition(
-                    opacity: fadeAnimation,
-                    child: _buildCategoryTile(context, categories[index]),
-                  ),
-                );
-              },
-            );
+            return _buildCategoryTile(context, _categories[index]);
           },
         );
       },
     );
   }
 
-  /// Builds the error state widget with a retry button.
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.red, size: 48),
-            const SizedBox(height: 16),
-            Text(
-              errorMessage!,
-              style: const TextStyle(color: Colors.red, fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _fetchCategories, // Call fetch again on retry
-              style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimaryColor,
-                foregroundColor: Colors.white,
-              ),
-              child: Text(widget.isEnglish ? 'Retry' : 'మళ్లీ ప్రయత్నించండి'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-  
-  /// Creates a LinearGradient from a list of colors.
-  LinearGradient _createGradient(List<Color> colors) {
-    return LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: colors,
-    );
-  }
-
-  /// Builds a single, interactive category tile.
-  Widget _buildCategoryTile(BuildContext context, CategoryItem category) {
+  /// Builds a single, interactive category tile with a light skin.
+  Widget _buildCategoryTile(BuildContext context, CategoryInfo category) {
     final isSelected = widget.selectedCategory == category.apiName;
+    final String name =
+        widget.isEnglish ? category.englishName : category.teluguName;
+    final String description = widget.isEnglish
+        ? category.englishDescription
+        : category.teluguDescription;
 
     return GestureDetector(
       onTap: () {
         final newSelection = isSelected ? null : category.apiName;
         widget.onCategorySelected?.call(newSelection);
-        
-        final String selectedText = widget.isEnglish ? 'Selected' : 'ఎంచుకున్నవి';
-        final String deselectedText = widget.isEnglish ? 'Deselected' : 'ఎంపిక తీసివేయబడింది';
-
-        // Optional: Show a snackbar on selection
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Row(children: [
-            Text(category.icon, style: const TextStyle(fontSize: 20)),
-            const SizedBox(width: 8),
-            Text(isSelected ? '$deselectedText: ${category.title}' : '$selectedText: ${category.title}'),
-          ]),
-          backgroundColor: kPrimaryColor,
-          duration: const Duration(seconds: 1),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-        ));
       },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-        transform: Matrix4.identity()..scale(isSelected ? 1.05 : 1.0),
+      child: Container(
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          gradient: category.gradient,
-          borderRadius: BorderRadius.circular(20),
+          color: Colors.white, // Light background for the tile
+          borderRadius: BorderRadius.circular(16),
+          border: isSelected
+              ? Border.all(color: kPrimaryColor, width: 2) // Highlight border
+              : Border.all(color: Colors.grey.shade200), // Default border
           boxShadow: [
             BoxShadow(
-              color: isSelected ? kPrimaryColor.withOpacity(0.4) : Colors.black.withOpacity(0.1),
-              offset: const Offset(0, 8),
-              blurRadius: isSelected ? 20 : 15,
+              color: isSelected
+                  ? kPrimaryColor.withOpacity(0.15)
+                  : Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
           ],
-          border: isSelected ? Border.all(color: Colors.white.withOpacity(0.8), width: 3) : null,
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text(category.icon, style: const TextStyle(fontSize: 32)),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8.0),
-              child: Text(
-                category.title,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                  shadows: [Shadow(offset: Offset(0, 1), blurRadius: 2, color: Colors.black38)],
+            // Icon with gradient background
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: category.gradientColors,
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                category.icon,
+                color: Colors.white,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Text Content
+            Expanded(
+              child: RichText(
+                text: TextSpan(
+                  style: const TextStyle(
+                    color: Colors.black87, // Black text for readability
+                  ),
+                  children: <TextSpan>[
+                    TextSpan(
+                      text: '$name: ',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: Colors.black,
+                      ),
+                    ),
+                    TextSpan(
+                      text: description,
+                      style: TextStyle(
+                        fontSize: 14,
+                        height: 1.4,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -378,19 +293,4 @@ class _CategoryGridState extends State<CategoryGrid>
       ),
     );
   }
-}
-
-/// A data class for a category item.
-class CategoryItem {
-  final String icon;
-  final String title;
-  final String apiName; // The original name from the API for consistent selection
-  final LinearGradient gradient;
-
-  CategoryItem({
-    required this.icon,
-    required this.title,
-    required this.apiName,
-    required this.gradient,
-  });
 }

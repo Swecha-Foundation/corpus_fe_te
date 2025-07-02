@@ -92,6 +92,7 @@ class _RecordingSectionState extends State<RecordingSection>
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => InputMethodScreen(
           selectedCategory: widget.selectedCategory!,
+          isEnglish: widget.isEnglish,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(

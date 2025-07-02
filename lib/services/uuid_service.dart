@@ -106,7 +106,7 @@ class UuidService {
   'Culture': 'ab9fa2ce-1f83-4e91-b89d-cca18e8b301e',
   'Flora & Fauna': '5f40610f-ae47-4472-944c-cb899128ebbf',
   'Education': '784ddb92-9540-4ce1-b4e4-6c1b7b18849d',
-  'Vegetation': '2f831ae2-f0cd-4142-8646-68dd195dfba2',
+  '': '2f831ae2-f0cd-4142-8646-68dd195dfba2',
   'Dance': '3fa85f64-5717-4562-b3fc-2c963f66afa6',
 };
     

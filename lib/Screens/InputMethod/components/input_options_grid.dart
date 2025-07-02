@@ -8,6 +8,7 @@ class InputOptionsGrid extends StatefulWidget {
   final VoidCallback onAudioTap;
   final VoidCallback onVideoTap;
   final VoidCallback onPictureTap;
+  final bool isEnglish; // Add language state
 
   const InputOptionsGrid({
     Key? key,
@@ -15,6 +16,7 @@ class InputOptionsGrid extends StatefulWidget {
     required this.onAudioTap,
     required this.onVideoTap,
     required this.onPictureTap,
+    required this.isEnglish, // Require language state
   }) : super(key: key);
 
   @override
@@ -24,41 +26,74 @@ class InputOptionsGrid extends StatefulWidget {
 class _InputOptionsGridState extends State<InputOptionsGrid>
     with TickerProviderStateMixin {
   late List<AnimationController> _animationControllers;
-  late List<Animation<double>> _scaleAnimations;
-  late List<Animation<double>> _fadeAnimations;
+  late final List<Map<String, dynamic>> _inputOptions;
 
   @override
   void initState() {
     super.initState();
+
+    // The data now includes English and Telugu text.
+    _inputOptions = [
+      {
+        'title_en': 'Text Input',
+        'title_te': 'టెక్స్ట్ ఇన్‌పుట్',
+        'subtitle_en': 'Type your content',
+        'subtitle_te': 'మీ కంటెంట్‌ను టైప్ చేయండి',
+        'icon': Icons.text_fields_rounded,
+        'color': const Color(0xFF4CAF50),
+        'onTap': widget.onTextTap,
+      },
+      {
+        'title_en': 'Audio Recording',
+        'title_te': 'ఆడియో రికార్డింగ్',
+        'subtitle_en': 'Record your voice',
+        'subtitle_te': 'మీ వాయిస్‌ని రికార్డ్ చేయండి',
+        'icon': Icons.mic_rounded,
+        'color': const Color(0xFF2196F3),
+        'onTap': widget.onAudioTap,
+      },
+      {
+        'title_en': 'Picture Upload',
+        'title_te': 'చిత్రం అప్‌లోడ్',
+        'subtitle_en': 'Add images',
+        'subtitle_te': 'చిత్రాలను జోడించండి',
+        'icon': Icons.photo_camera_rounded,
+        'color': const Color(0xFFFF9800),
+        'onTap': widget.onPictureTap,
+      },
+      {
+        'title_en': 'Video Recording',
+        'title_te': 'వీడియో రికార్డింగ్',
+        'subtitle_en': 'Record a clip',
+        'subtitle_te': 'ఒక క్లిప్ రికార్డ్ చేయండి',
+        'icon': Icons.videocam_rounded,
+        'color': const Color(0xFF9C27B0),
+        'onTap': widget.onVideoTap,
+      },
+    ];
+
     _initializeAnimations();
   }
 
   void _initializeAnimations() {
     _animationControllers = List.generate(
-      4,
+      _inputOptions.length,
       (index) => AnimationController(
-        duration: Duration(milliseconds: 600 + (index * 100)),
+        duration: const Duration(milliseconds: 500),
         vsync: this,
       ),
     );
 
-    _scaleAnimations = _animationControllers.map((controller) {
-      return Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: controller, curve: Curves.elasticOut),
-      );
-    }).toList();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _runAnimations();
+    });
+  }
 
-    _fadeAnimations = _animationControllers.map((controller) {
-      return Tween<double>(begin: 0.0, end: 1.0).animate(
-        CurvedAnimation(parent: controller, curve: Curves.easeOut),
-      );
-    }).toList();
-
-    // Start animations with staggered delays
+  void _runAnimations() {
     for (int i = 0; i < _animationControllers.length; i++) {
-      Future.delayed(Duration(milliseconds: i * 150), () {
+      Future.delayed(Duration(milliseconds: 100 * (i + 1)), () {
         if (mounted) {
-          _animationControllers[i].forward();
+          _animationControllers[i].forward(from: 0.0);
         }
       });
     }
@@ -74,396 +109,204 @@ class _InputOptionsGridState extends State<InputOptionsGrid>
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildSectionHeader(),
-        const SizedBox(height: 24),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
+    return Center(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          const double breakpoint = 700.0;
+
+          if (constraints.maxWidth < breakpoint) {
+            return _buildListLayout();
+          } else {
+            return _buildGridLayout();
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildGridLayout() {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 700),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
           crossAxisSpacing: 16,
           mainAxisSpacing: 16,
-          childAspectRatio: 0.75, // Reduced from 0.85 to give more height
+          childAspectRatio: 1.0,
+        ),
+        itemCount: _inputOptions.length,
+        itemBuilder: (context, index) {
+          return _buildAnimatedTile(
+            index: index,
+            child: _buildGridTile(option: _inputOptions[index]),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildListLayout() {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 600),
+      child: Column(
+        children: _inputOptions.asMap().entries.map((entry) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8.0),
+            child: _buildAnimatedTile(
+              index: entry.key,
+              child: _buildListTile(option: entry.value),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedTile({required int index, required Widget child}) {
+    final animation = CurvedAnimation(
+      parent: _animationControllers[index],
+      curve: Curves.easeOutBack,
+    );
+    return ScaleTransition(
+      scale: Tween<double>(begin: 0.9, end: 1.0).animate(animation),
+      child: FadeTransition(
+        opacity: Tween<double>(begin: 0.0, end: 1.0).animate(animation),
+        child: child,
+      ),
+    );
+  }
+
+  Widget _buildGridTile({required Map<String, dynamic> option}) {
+    return GestureDetector(
+      onTap: option['onTap'],
+      child: Container(
+        padding: const EdgeInsets.all(16.0),
+        decoration: _tileDecoration(),
+        child: Column(
           children: [
-            _buildInputOption(
-              index: 0,
-              icon: Icons.text_fields_rounded,
-              title: 'Text Input',
-              subtitle: 'Type your content',
-              color: const Color(0xFF4CAF50),
-              onTap: widget.onTextTap,
-            ),
-            _buildInputOption(
-              index: 1,
-              icon: Icons.mic_rounded,
-              title: 'Audio Recording',
-              subtitle: 'Record your voice',
-              color: const Color(0xFF2196F3),
-              onTap: widget.onAudioTap,
-            ),
-            _buildInputOption(
-              index: 2,
-              icon: Icons.photo_camera_rounded,
-              title: 'Picture Upload',
-              subtitle: 'Add images',
-              color: const Color(0xFFFF9800),
-              onTap: widget.onPictureTap,
-            ),
-            _buildInputOption(
-              index: 3,
-              icon: Icons.videocam_rounded,
-              title: 'Video Recording',
-              subtitle: 'Record videos',
-              color: const Color(0xFF9C27B0),
-              onTap: widget.onVideoTap,
-            ),
+            const Spacer(),
+            _buildIcon(option),
+            const SizedBox(height: 16),
+            _buildTitleText(widget.isEnglish ? option['title_en'] : option['title_te']),
+            const SizedBox(height: 4),
+            _buildSubtitleText(widget.isEnglish ? option['subtitle_en'] : option['subtitle_te']),
+            const Spacer(),
+            _buildTapToAction(),
+            const SizedBox(height: 8),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildListTile({required Map<String, dynamic> option}) {
+    return GestureDetector(
+      onTap: option['onTap'],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+        decoration: _tileDecoration(),
+        child: Row(
+          children: [
+            _buildIcon(option),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildTitleText(widget.isEnglish ? option['title_en'] : option['title_te']),
+                  const SizedBox(height: 2),
+                  _buildSubtitleText(widget.isEnglish ? option['subtitle_en'] : option['subtitle_te']),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            _buildTapToAction(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // --- Reusable Component Widgets ---
+
+  BoxDecoration _tileDecoration() {
+    return BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.06),
+          offset: const Offset(0, 4),
+          blurRadius: 12,
+        )
       ],
+      border: Border.all(color: Colors.grey.shade200, width: 1),
     );
   }
 
-  Widget _buildSectionHeader() {
+  Widget _buildIcon(Map<String, dynamic> option) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.white,
-            Colors.grey.shade50,
-          ],
-        ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            offset: const Offset(0, 2),
-            blurRadius: 8,
-          ),
-        ],
+        color: (option['color'] as Color).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
       ),
+      child: Icon(option['icon'], color: option['color'], size: 28),
+    );
+  }
+
+  Widget _buildTitleText(String title) {
+    return Text(
+      title,
+      textAlign: TextAlign.center,
+      style: const TextStyle(
+        fontSize: 15,
+        fontWeight: FontWeight.bold,
+        color: Colors.black87,
+      ),
+    );
+  }
+
+  Widget _buildSubtitleText(String subtitle) {
+    return Text(
+      subtitle,
+      textAlign: TextAlign.center,
+      style: TextStyle(
+        fontSize: 13,
+        color: Colors.grey.shade600,
+      ),
+    );
+  }
+
+  Widget _buildTapToAction() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade200)),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [
-                  kPrimaryColor.withOpacity(0.1),
-                  kPrimaryColor.withOpacity(0.05),
-                ],
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.touch_app_rounded,
-              color: kPrimaryColor,
-              size: 24,
+          Text(
+            widget.isEnglish ? 'Tap to select' : 'ఎంచుకోవడానికి నొక్కండి',
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w500,
             ),
           ),
-          const SizedBox(width: 16),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Select Input Method',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
-                  ),
-                ),
-                Text(
-                  'Choose how you want to add your content',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.black54,
-                  ),
-                ),
-              ],
-            ),
+          const SizedBox(width: 4),
+          Icon(
+            Icons.touch_app_outlined,
+            color: Colors.grey.shade700,
+            size: 12,
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildInputOption({
-    required int index,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return AnimatedBuilder(
-      animation: _animationControllers[index],
-      builder: (context, child) {
-        return Transform.scale(
-          scale: _scaleAnimations[index].value,
-          child: FadeTransition(
-            opacity: _fadeAnimations[index],
-            child: _InputOptionCard(
-              icon: icon,
-              title: title,
-              subtitle: subtitle,
-              color: color,
-              onTap: onTap,
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _InputOptionCard extends StatefulWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _InputOptionCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  State<_InputOptionCard> createState() => _InputOptionCardState();
-}
-
-class _InputOptionCardState extends State<_InputOptionCard>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _hoverController;
-  late Animation<double> _hoverAnimation;
-  bool _isPressed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _hoverController = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
-    _hoverAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
-      CurvedAnimation(parent: _hoverController, curve: Curves.easeInOut),
-    );
-  }
-
-  @override
-  void dispose() {
-    _hoverController.dispose();
-    super.dispose();
-  }
-
-  void _handleTapDown(TapDownDetails details) {
-    setState(() => _isPressed = true);
-    _hoverController.forward();
-  }
-
-  void _handleTapUp(TapUpDetails details) {
-    setState(() => _isPressed = false);
-    _hoverController.reverse();
-    widget.onTap();
-  }
-
-  void _handleTapCancel() {
-    setState(() => _isPressed = false);
-    _hoverController.reverse();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _hoverAnimation,
-      builder: (context, child) {
-        return Transform.scale(
-          scale: _hoverAnimation.value,
-          child: GestureDetector(
-            onTapDown: _handleTapDown,
-            onTapUp: _handleTapUp,
-            onTapCancel: _handleTapCancel,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white,
-                    Colors.grey.shade50,
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                    color: _isPressed 
-                        ? widget.color.withOpacity(0.3)
-                        : Colors.black.withOpacity(0.08),
-                    offset: Offset(0, _isPressed ? 4 : 8),
-                    blurRadius: _isPressed ? 12 : 20,
-                  ),
-                  if (_isPressed)
-                    BoxShadow(
-                      color: widget.color.withOpacity(0.1),
-                      offset: const Offset(0, 2),
-                      blurRadius: 8,
-                    ),
-                ],
-                border: Border.all(
-                  color: _isPressed 
-                      ? widget.color.withOpacity(0.3)
-                      : Colors.transparent,
-                  width: 2,
-                ),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  padding: const EdgeInsets.all(16), // Reduced from 20
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.white.withOpacity(0.9),
-                        Colors.white.withOpacity(0.7),
-                      ],
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween, // Changed from center
-                    children: [
-                      // Icon Container
-                      Container(
-                        width: 50, // Reduced from 60
-                        height: 50, // Reduced from 60
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              widget.color,
-                              widget.color.withOpacity(0.8),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(14), // Reduced from 16
-                          boxShadow: [
-                            BoxShadow(
-                              color: widget.color.withOpacity(0.3),
-                              offset: const Offset(0, 4),
-                              blurRadius: 12,
-                            ),
-                          ],
-                        ),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                Colors.white.withOpacity(0.2),
-                                Colors.white.withOpacity(0.0),
-                              ],
-                            ),
-                          ),
-                          child: Icon(
-                            widget.icon,
-                            color: Colors.white,
-                            size: 24, // Reduced from 28
-                          ),
-                        ),
-                      ),
-                      
-                      // Text Section - More compact
-                      Column(
-                        children: [
-                          // Title
-                          Text(
-                            widget.title,
-                            style: const TextStyle(
-                              fontSize: 14, // Reduced from 16
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black87,
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          
-                          const SizedBox(height: 4), // Reduced from 6
-                          
-                          // Subtitle
-                          Text(
-                            widget.subtitle,
-                            style: TextStyle(
-                              fontSize: 11, // Reduced from 12
-                              color: Colors.grey.shade600,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            textAlign: TextAlign.center,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                      
-                      // Action Indicator - More compact
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10, // Reduced from 12
-                          vertical: 4, // Reduced from 6
-                        ),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              widget.color.withOpacity(0.1),
-                              widget.color.withOpacity(0.05),
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(16), // Reduced from 20
-                          border: Border.all(
-                            color: widget.color.withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Tap to select',
-                              style: TextStyle(
-                                fontSize: 9, // Reduced from 10
-                                color: widget.color,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(width: 3), // Reduced from 4
-                            Icon(
-                              Icons.arrow_forward_rounded,
-                              color: widget.color,
-                              size: 10, // Reduced from 12
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

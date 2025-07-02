@@ -10,17 +10,19 @@ import '../recording/picture_input_screen.dart';
 
 class InputMethodScreen extends StatefulWidget {
   final String selectedCategory;
-  
+  final bool isEnglish; // Add language state
+
   const InputMethodScreen({
     super.key,
     required this.selectedCategory,
+    required this.isEnglish, // Require language state
   });
 
   @override
   State<InputMethodScreen> createState() => _InputMethodScreenState();
 }
 
-class _InputMethodScreenState extends State<InputMethodScreen> 
+class _InputMethodScreenState extends State<InputMethodScreen>
     with TickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
@@ -33,7 +35,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       duration: const Duration(milliseconds: 800),
       vsync: this,
     );
-    
+
     _fadeAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -41,7 +43,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       parent: _animationController,
       curve: Curves.easeOut,
     ));
-    
+
     _slideAnimation = Tween<Offset>(
       begin: const Offset(0, 0.3),
       end: Offset.zero,
@@ -49,7 +51,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       parent: _animationController,
       curve: Curves.easeOutCubic,
     ));
-    
+
     _animationController.forward();
   }
 
@@ -59,12 +61,15 @@ class _InputMethodScreenState extends State<InputMethodScreen>
     super.dispose();
   }
 
+  // --- Navigation Handlers ---
+
   void _handleTextInput() {
     Navigator.push(
       context,
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => TextInputScreen(
           selectedCategory: widget.selectedCategory,
+          isEnglish: widget.isEnglish, 
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
@@ -86,7 +91,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => AudioInputScreen(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            AudioInputScreen(
           selectedCategory: widget.selectedCategory,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
@@ -106,12 +112,18 @@ class _InputMethodScreenState extends State<InputMethodScreen>
   }
 
   void _handleVideoInput() {
-    _showSnackBar('Opening video recording for ${widget.selectedCategory}...', Icons.videocam, const Color(0xFF9C27B0));
+    final String message = widget.isEnglish
+        ? 'Opening video recording for ${widget.selectedCategory}...'
+        : 'వీడియో రికార్డింగ్ తెరువబడుతోంది ${widget.selectedCategory}...';
+    _showSnackBar(message, Icons.videocam, const Color(0xFF9C27B0));
+
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => VideoInputScreen(
-          selectedCategory: widget.selectedCategory, userId: '',
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            VideoInputScreen(
+          selectedCategory: widget.selectedCategory,
+          userId: '',
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
@@ -128,13 +140,17 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       ),
     );
   }
-  
+
   void _handlePictureInput() {
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => PictureInputScreen(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            PictureInputScreen(
           selectedCategory: widget.selectedCategory,
+          // isEnglish: widget.isEnglish, // Add this line
+   
+
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
@@ -165,7 +181,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
         ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
       ),
     );
@@ -187,7 +204,7 @@ class _InputMethodScreenState extends State<InputMethodScreen>
                   children: [
                     // Custom App Bar
                     _buildCustomAppBar(),
-                    
+
                     // Main Content
                     Expanded(
                       child: SingleChildScrollView(
@@ -196,19 +213,21 @@ class _InputMethodScreenState extends State<InputMethodScreen>
                           children: [
                             // Category Display Section
                             _buildCategorySection(),
-                            
+
                             const SizedBox(height: 30),
-                            
+
                             // Input Options Grid
+                            // Note: InputOptionsGrid component would also need the isEnglish flag passed to it.
                             InputOptionsGrid(
                               onTextTap: _handleTextInput,
                               onAudioTap: _handleAudioInput,
                               onVideoTap: _handleVideoInput,
                               onPictureTap: _handlePictureInput,
+                               isEnglish: widget.isEnglish,
                             ),
-                            
+
                             const SizedBox(height: 30),
-                            
+
                             // Tips Section
                             _buildTipsSection(),
                           ],
@@ -224,6 +243,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
       ),
     );
   }
+
+  // --- Localized Build Widgets ---
 
   Widget _buildCustomAppBar() {
     return Container(
@@ -260,16 +281,20 @@ class _InputMethodScreenState extends State<InputMethodScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Choose Input Method',
-                  style: TextStyle(
+                Text(
+                  widget.isEnglish
+                      ? 'Choose Input Method'
+                      : 'ఇన్‌పుట్ పద్ధతిని ఎంచుకోండి',
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: Colors.black87,
                   ),
                 ),
                 Text(
-                  'How would you like to share your content?',
+                  widget.isEnglish
+                      ? 'How would you like to share your content?'
+                      : 'మీరు మీ కంటెంట్‌ను ఎలా పంచుకోవాలనుకుంటున్నారు?',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey.shade600,
@@ -314,9 +339,9 @@ class _InputMethodScreenState extends State<InputMethodScreen>
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'Selected Category',
-            style: TextStyle(
+          Text(
+            widget.isEnglish ? 'Selected Category' : 'ఎంచుకున్న వర్గం',
+            style: const TextStyle(
               fontSize: 16,
               color: Colors.black54,
               fontWeight: FontWeight.w500,
@@ -324,7 +349,8 @@ class _InputMethodScreenState extends State<InputMethodScreen>
           ),
           const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
             decoration: BoxDecoration(
               color: kPrimaryColor,
               borderRadius: BorderRadius.circular(25),
@@ -351,6 +377,41 @@ class _InputMethodScreenState extends State<InputMethodScreen>
   }
 
   Widget _buildTipsSection() {
+    final List<Map<String, dynamic>> tips = [
+      {
+        'icon': Icons.text_fields_rounded,
+        'title_en': 'Text Input',
+        'title_te': 'టెక్స్ట్ ఇన్‌పుట్',
+        'desc_en': 'Perfect for detailed stories and structured content',
+        'desc_te': 'వివరణాత్మక కథలు మరియు నిర్మాణాత్మక కంటెంట్ కోసం పరిపూర్ణమైనది',
+        'color': const Color(0xFF4CAF50),
+      },
+      {
+        'icon': Icons.mic_rounded,
+        'title_en': 'Audio Recording',
+        'title_te': 'ఆడియో రికార్డింగ్',
+        'desc_en': 'Capture natural speech and ambient sounds',
+        'desc_te': 'సహజమైన ప్రసంగం మరియు పరిసర శబ్దాలను సంగ్రహించండి',
+        'color': const Color(0xFF2196F3),
+      },
+      {
+        'icon': Icons.photo_camera_rounded,
+        'title_en': 'Picture Upload',
+        'title_te': 'చిత్రం అప్‌లోడ్',
+        'desc_en': 'Visual content with automatic descriptions',
+        'desc_te': 'ఆటోమేటిక్ వివరణలతో కూడిన దృశ్య కంటెంట్',
+        'color': const Color(0xFFFF9800),
+      },
+      {
+        'icon': Icons.videocam_rounded,
+        'title_en': 'Video Recording',
+        'title_te': 'వీడియో రికార్డింగ్',
+        'desc_en': 'Dynamic content with audio and visuals',
+        'desc_te': 'ఆడియో మరియు విజువల్స్‌తో డైనమిక్ కంటెంట్',
+        'color': const Color(0xFF9C27B0),
+      },
+    ];
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -383,9 +444,9 @@ class _InputMethodScreenState extends State<InputMethodScreen>
                 ),
               ),
               const SizedBox(width: 12),
-              const Text(
-                'Quick Tips',
-                style: TextStyle(
+              Text(
+                widget.isEnglish ? 'Quick Tips' : 'త్వరిత చిట్కాలు',
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: Colors.black87,
@@ -394,33 +455,18 @@ class _InputMethodScreenState extends State<InputMethodScreen>
             ],
           ),
           const SizedBox(height: 16),
-          _buildTipItem(
-            icon: Icons.text_fields_rounded,
-            title: 'Text Input',
-            description: 'Perfect for detailed stories and structured content',
-            color: const Color(0xFF4CAF50),
-          ),
-          const SizedBox(height: 12),
-          _buildTipItem(
-            icon: Icons.mic_rounded,
-            title: 'Audio Recording',
-            description: 'Capture natural speech and ambient sounds',
-            color: const Color(0xFF2196F3),
-          ),
-          const SizedBox(height: 12),
-          _buildTipItem(
-            icon: Icons.photo_camera_rounded,
-            title: 'Picture Upload',
-            description: 'Visual content with automatic descriptions',
-            color: const Color(0xFFFF9800),
-          ),
-          const SizedBox(height: 12),
-          _buildTipItem(
-            icon: Icons.videocam_rounded,
-            title: 'Video Recording',
-            description: 'Dynamic content with audio and visuals',
-            color: const Color(0xFF9C27B0),
-          ),
+          ...tips.map((tip) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12.0),
+              child: _buildTipItem(
+                icon: tip['icon'],
+                title: widget.isEnglish ? tip['title_en'] : tip['title_te'],
+                description:
+                    widget.isEnglish ? tip['desc_en'] : tip['desc_te'],
+                color: tip['color'],
+              ),
+            );
+          }).toList(),
         ],
       ),
     );

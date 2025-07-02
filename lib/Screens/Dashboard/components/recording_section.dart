@@ -6,26 +6,28 @@ import '../../InputMethod/input_method_screen.dart';
 
 class RecordingSection extends StatefulWidget {
   final String? selectedCategory;
-  final bool showOptions; // Keep for compatibility but not used for input methods
-  final VoidCallback onToggleOptions; // Keep for compatibility
-  
+  final bool showOptions;
+  final VoidCallback onToggleOptions;
+  final bool isEnglish; // Added to receive language state
+
   const RecordingSection({
     Key? key,
     this.selectedCategory,
     required this.showOptions,
     required this.onToggleOptions,
+    required this.isEnglish, // Make it required
   }) : super(key: key);
 
   @override
   State<RecordingSection> createState() => _RecordingSectionState();
 }
 
-class _RecordingSectionState extends State<RecordingSection> 
+class _RecordingSectionState extends State<RecordingSection>
     with TickerProviderStateMixin {
   late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation; // This was declared but never initialized
-  bool _hasNavigated = false; // Track navigation state
-  String? _lastProcessedCategory; // Track the last category we processed for auto-navigation
+  late Animation<double> _pulseAnimation;
+  bool _hasNavigated = false;
+  String? _lastProcessedCategory;
 
   @override
   void initState() {
@@ -34,8 +36,7 @@ class _RecordingSectionState extends State<RecordingSection>
       duration: const Duration(milliseconds: 2000),
       vsync: this,
     );
-    
-    // FIX: Initialize the _pulseAnimation properly
+
     _pulseAnimation = Tween<double>(
       begin: 1.0,
       end: 1.1,
@@ -43,7 +44,7 @@ class _RecordingSectionState extends State<RecordingSection>
       parent: _pulseController,
       curve: Curves.easeInOut,
     ));
-    
+
     _pulseController.repeat(reverse: true);
   }
 
@@ -56,24 +57,18 @@ class _RecordingSectionState extends State<RecordingSection>
   @override
   void didUpdateWidget(RecordingSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
-    // Only reset navigation flag when category actually changes
+
     if (oldWidget.selectedCategory != widget.selectedCategory) {
       _hasNavigated = false;
-      _lastProcessedCategory = null; // Reset processed category tracking
+      _lastProcessedCategory = null;
     }
-    
-    // Auto-navigate only when:
-    // 1. Category is selected
-    // 2. We haven't navigated yet
-    // 3. This is a new category (different from last processed)
-    if (widget.selectedCategory != null && 
-        !_hasNavigated && 
+
+    if (widget.selectedCategory != null &&
+        !_hasNavigated &&
         _lastProcessedCategory != widget.selectedCategory) {
-      
-      _hasNavigated = true; // Set flag immediately to prevent multiple navigations
-      _lastProcessedCategory = widget.selectedCategory; // Remember this category
-      
+      _hasNavigated = true;
+      _lastProcessedCategory = widget.selectedCategory;
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _navigateToInputMethod(context);
@@ -86,12 +81,14 @@ class _RecordingSectionState extends State<RecordingSection>
     if (widget.selectedCategory == null) {
       return;
     }
-    
+
     Navigator.push(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => InputMethodScreen(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            InputMethodScreen(
           selectedCategory: widget.selectedCategory!,
+           isEnglish: widget.isEnglish, // This will be passed to the InputMethodScreen
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return SlideTransition(
@@ -107,8 +104,6 @@ class _RecordingSectionState extends State<RecordingSection>
         },
       ),
     ).then((_) {
-      // Reset navigation flag when returning from InputMethodScreen
-      // but keep the _lastProcessedCategory to prevent re-navigation
       if (mounted) {
         setState(() {
           _hasNavigated = false;
@@ -117,7 +112,6 @@ class _RecordingSectionState extends State<RecordingSection>
     });
   }
 
-  // Add manual navigation method for tap gesture
   void _handleManualNavigation() {
     if (widget.selectedCategory != null) {
       _navigateToInputMethod(context);
@@ -127,7 +121,7 @@ class _RecordingSectionState extends State<RecordingSection>
   @override
   Widget build(BuildContext context) {
     final bool canProceed = widget.selectedCategory != null;
-    
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -170,13 +164,10 @@ class _RecordingSectionState extends State<RecordingSection>
           ),
           child: Column(
             children: [
-              // Header Section
               _buildHeaderSection(canProceed),
               const SizedBox(height: 16),
               _buildSubtitleSection(canProceed),
               const SizedBox(height: 40),
-              
-              // Main Content - Show category selection prompt or navigation button
               AnimatedSwitcher(
                 duration: const Duration(milliseconds: 600),
                 transitionBuilder: (Widget child, Animation<double> animation) {
@@ -185,20 +176,13 @@ class _RecordingSectionState extends State<RecordingSection>
                     child: FadeTransition(opacity: animation, child: child),
                   );
                 },
-                child: !canProceed 
-                  ? _buildCategoryRequiredMessage()
-                  : _buildNavigationButton(),
+                child: !canProceed
+                    ? _buildCategoryRequiredMessage()
+                    : _buildNavigationButton(),
               ),
-              
               const SizedBox(height: 40),
-              
-              // Progress indicator
               _buildProgressIndicator(canProceed),
-              
               const SizedBox(height: 32),
-              
-              // Stats Section
-              // _buildStatsSection(),
             ],
           ),
         ),
@@ -211,16 +195,23 @@ class _RecordingSectionState extends State<RecordingSection>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: canProceed 
-            ? [kPrimaryColor.withOpacity(0.1), kPrimaryColor.withOpacity(0.05)]
-            : [Colors.orange.withOpacity(0.1), Colors.orange.withOpacity(0.05)],
+          colors: canProceed
+              ? [kPrimaryColor.withOpacity(0.1), kPrimaryColor.withOpacity(0.05)]
+              : [
+                  Colors.orange.withOpacity(0.1),
+                  Colors.orange.withOpacity(0.05)
+                ],
         ),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        canProceed 
-          ? '🚀 Ready to Choose Input Method'
-          : '📂 Select Category First',
+        canProceed
+            ? (widget.isEnglish
+                ? '🚀 Ready to Choose Input Method'
+                : '🚀 ఇన్‌పుట్ పద్ధతిని ఎంచుకోవడానికి సిద్ధంగా ఉంది')
+            : (widget.isEnglish
+                ? '📂 Select Category First'
+                : '📂 ముందుగా వర్గాన్ని ఎంచుకోండి'),
         style: TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.bold,
@@ -238,7 +229,10 @@ class _RecordingSectionState extends State<RecordingSection>
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [kPrimaryColor.withOpacity(0.1), kPrimaryColor.withOpacity(0.05)],
+                colors: [
+                  kPrimaryColor.withOpacity(0.1),
+                  kPrimaryColor.withOpacity(0.05)
+                ],
               ),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: kPrimaryColor.withOpacity(0.3), width: 1),
@@ -246,10 +240,13 @@ class _RecordingSectionState extends State<RecordingSection>
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.check_circle_rounded, color: kPrimaryColor, size: 16),
+                const Icon(Icons.check_circle_rounded,
+                    color: kPrimaryColor, size: 16),
                 const SizedBox(width: 6),
                 Text(
-                  'Category: ${widget.selectedCategory}',
+                  widget.isEnglish
+                      ? 'Category: ${widget.selectedCategory}'
+                      : 'వర్గం: ${widget.selectedCategory}',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -261,7 +258,9 @@ class _RecordingSectionState extends State<RecordingSection>
           ),
           const SizedBox(height: 12),
           Text(
-            'Tap below to choose how you want to share your content',
+            widget.isEnglish
+                ? 'Tap below to choose how you want to share your content'
+                : 'మీరు మీ కంటెంట్‌ను ఎలా భాగస్వామ్యం చేయాలనుకుంటున్నారో ఎంచుకోవడానికి దిగువన నొక్కండి',
             style: TextStyle(
               fontSize: 16,
               color: Colors.grey.shade600,
@@ -272,9 +271,11 @@ class _RecordingSectionState extends State<RecordingSection>
         ],
       );
     }
-    
+
     return Text(
-      'Please select a category from above to continue',
+      widget.isEnglish
+          ? 'Please select a category from above to continue'
+          : 'కొనసాగించడానికి దయచేసి ఎగువ నుండి ఒక వర్గాన్ని ఎంచుకోండి',
       style: TextStyle(
         fontSize: 16,
         color: Colors.orange.shade600,
@@ -339,7 +340,9 @@ class _RecordingSectionState extends State<RecordingSection>
           child: Column(
             children: [
               Text(
-                'Choose a category first',
+                widget.isEnglish
+                    ? 'Choose a category first'
+                    : 'ముందుగా ఒక వర్గాన్ని ఎంచుకోండి',
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.orange.shade700,
@@ -348,12 +351,15 @@ class _RecordingSectionState extends State<RecordingSection>
               ),
               const SizedBox(height: 4),
               Text(
-                'Select from the categories above to proceed',
+                widget.isEnglish
+                    ? 'Select from the categories above to proceed'
+                    : 'కొనసాగించడానికి ఎగువ వర్గాల నుండి ఎంచుకోండి',
                 style: TextStyle(
                   fontSize: 14,
                   color: Colors.orange.shade600,
                   fontWeight: FontWeight.w400,
                 ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),
@@ -424,23 +430,29 @@ class _RecordingSectionState extends State<RecordingSection>
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [kPrimaryColor.withOpacity(0.1), kPrimaryColor.withOpacity(0.05)],
+                colors: [
+                  kPrimaryColor.withOpacity(0.1),
+                  kPrimaryColor.withOpacity(0.05)
+                ],
               ),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: kPrimaryColor.withOpacity(0.3), width: 1),
+              border:
+                  Border.all(color: kPrimaryColor.withOpacity(0.3), width: 1),
             ),
-            child: const Row(
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
+                const Icon(
                   Icons.touch_app_rounded,
                   color: kPrimaryColor,
                   size: 20,
                 ),
-                SizedBox(width: 12),
+                const SizedBox(width: 12),
                 Text(
-                  'Choose Input Method',
-                  style: TextStyle(
+                  widget.isEnglish
+                      ? 'Choose Input Method'
+                      : 'ఇన్‌పుట్ పద్ధతిని ఎంచుకోండి',
+                  style: const TextStyle(
                     fontSize: 16,
                     color: kPrimaryColor,
                     fontWeight: FontWeight.w600,
@@ -464,7 +476,6 @@ class _RecordingSectionState extends State<RecordingSection>
       ),
       child: Row(
         children: [
-          // Step 1 - Category Selection
           Container(
             width: 32,
             height: 32,
@@ -478,7 +489,6 @@ class _RecordingSectionState extends State<RecordingSection>
               size: 18,
             ),
           ),
-          
           Expanded(
             child: Container(
               height: 2,
@@ -489,8 +499,6 @@ class _RecordingSectionState extends State<RecordingSection>
               ),
             ),
           ),
-          
-          // Step 2 - Input Method Selection (Now Active)
           Container(
             width: 32,
             height: 32,
@@ -504,7 +512,6 @@ class _RecordingSectionState extends State<RecordingSection>
               size: 18,
             ),
           ),
-          
           Expanded(
             child: Container(
               height: 2,
@@ -515,8 +522,6 @@ class _RecordingSectionState extends State<RecordingSection>
               ),
             ),
           ),
-          
-          // Step 3 - Content Creation
           Container(
             width: 32,
             height: 32,
@@ -532,99 +537,6 @@ class _RecordingSectionState extends State<RecordingSection>
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildStatsSection() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            kPrimaryColor.withOpacity(0.05),
-            kPrimaryColor.withOpacity(0.1),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: kPrimaryColor.withOpacity(0.3), width: 1),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildStatItem(
-              icon: Icons.record_voice_over_rounded,
-              value: '23',
-              label: 'Hours of voice',
-              color: const Color(0xFF4CAF50),
-            ),
-          ),
-          Container(
-            width: 2,
-            height: 60,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.grey,
-                  Colors.grey.withOpacity(0.5),
-                  Colors.grey,
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: _buildStatItem(
-              icon: Icons.stars_rounded,
-              value: '234',
-              label: 'Credit score',
-              color: const Color(0xFFFF9800),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatItem({
-    required IconData icon,
-    required String value,
-    required String label,
-    required Color color,
-  }) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Icon(icon, color: color, size: 24),
-        ),
-        const SizedBox(height: 12),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: Colors.black87,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w500,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ],
     );
   }
 }

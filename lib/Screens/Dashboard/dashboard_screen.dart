@@ -10,7 +10,7 @@ import 'components/recording_section.dart';
 class DashboardScreen extends StatefulWidget {
   final String userName;
   final String phoneNumber;
-  
+
   const DashboardScreen({
     Key? key,
     required this.userName,
@@ -21,19 +21,19 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> 
+class _DashboardScreenState extends State<DashboardScreen>
     with TickerProviderStateMixin {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   late AnimationController _appBarController;
   late AnimationController _contentController;
   late Animation<double> _appBarAnimation;
   late Animation<double> _contentAnimation;
-  
+
   bool _showOptions = false;
   bool _isOnline = true;
   double _fontSize = 1.0;
   String? _selectedCategory;
-  bool _isEnglish = false; // Add language toggle state
+  bool _isEnglish = true; // Set default language to English
 
   // Language content map
   final Map<String, Map<String, String>> _languageContent = {
@@ -41,25 +41,25 @@ class _DashboardScreenState extends State<DashboardScreen>
       'title': 'Telugu Language Connect',
       'welcome': 'Welcome back,',
       'question': 'What do you want to speak about?',
-      'description': 'Select a category to get topic ideas, then choose your input method to start sharing your thoughts.',
+      'description':
+          'Select a category to get topic ideas, then choose your input method to start sharing your thoughts.',
       'online': 'Online',
       'offline': 'Offline',
       'onlineMessage': 'You are now online',
       'offlineMessage': 'You are now offline',
       'fontSize': 'Font size',
-
     },
     'te': {
-      'title': 'తెలుగు భాష సంపర్కే',
+      'title': 'తెలుగు భాషా సంపర్క్',
       'welcome': 'మళ్లీ స్వాగతం,',
       'question': 'మీరు దేని గురించి మాట్లాడాలనుకుంటున్నారు?',
-      'description': 'విషయ ఆలోచనలను పొందడానికి ఒక వర్గాన్ని ఎంచుకోండి, ఆపై మీ ఆలోచనలను పంచుకోవడానికి మీ ఇన్‌పుట్ పద్ధతిని ఎంచుకోండి.',
+      'description':
+          'విషయ ఆలోచనలను పొందడానికి ఒక వర్గాన్ని ఎంచుకోండి, ఆపై మీ ఆలోచనలను పంచుకోవడానికి మీ ఇన్‌పుట్ పద్ధతిని ఎంచుకోండి.',
       'online': 'ఆన్‌లైన్',
       'offline': 'ఆఫ్‌లైన్',
       'onlineMessage': 'మీరు ఇప్పుడు ఆన్‌లైన్‌లో ఉన్నారు',
       'offlineMessage': 'మీరు ఇప్పుడు ఆఫ్‌లైన్‌లో ఉన్నారు',
       'fontSize': 'ఫాంట్ పరిమాణం',
-  
     },
   };
 
@@ -70,29 +70,27 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
-    
+
     _appBarController = AnimationController(
       duration: const Duration(milliseconds: 800),
       vsync: this,
     );
-    
+
     _contentController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
-    
-    // FIXED: Initialize the animations properly
+
     _appBarAnimation = CurvedAnimation(
       parent: _appBarController,
       curve: Curves.easeOutCubic,
     );
-    
+
     _contentAnimation = CurvedAnimation(
       parent: _contentController,
       curve: Curves.easeOutCubic,
     );
-    
-    // Start animations
+
     _appBarController.forward();
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _contentController.forward();
@@ -126,7 +124,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     setState(() {
       _isOnline = !_isOnline;
     });
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -167,7 +165,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     setState(() {
       _fontSize = _fontSize >= 1.4 ? 1.0 : _fontSize + 0.2;
     });
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -207,7 +205,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     setState(() {
       _isEnglish = !_isEnglish;
     });
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(
@@ -300,7 +298,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                             ],
                           ),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
                         child: Row(
                           children: [
                             // Menu Button
@@ -331,13 +330,14 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 ),
                               ),
                             ),
-                            
+
                             const SizedBox(width: 8),
-                            
+
                             // Title - Flexible to prevent overflow
                             Expanded(
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
                                     colors: [
@@ -354,7 +354,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 child: Text(
                                   _getText('title'),
                                   style: TextStyle(
-                                    fontSize: (14 * _fontSize).clamp(12.0, 16.0), // Clamp font size
+                                    fontSize:
+                                        (14 * _fontSize).clamp(12.0, 16.0),
                                     fontWeight: FontWeight.bold,
                                     color: kPrimaryColor,
                                   ),
@@ -364,9 +365,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 ),
                               ),
                             ),
-                            
+
                             const SizedBox(width: 8),
-                            
+
                             // Control Buttons Row
                             Row(
                               mainAxisSize: MainAxisSize.min,
@@ -375,19 +376,28 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 GestureDetector(
                                   onTap: _toggleOnlineStatus,
                                   child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 300),
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                    duration:
+                                        const Duration(milliseconds: 300),
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 6),
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
                                         colors: _isOnline
-                                          ? [Colors.green.withOpacity(0.1), Colors.green.withOpacity(0.05)]
-                                          : [Colors.grey.withOpacity(0.1), Colors.grey.withOpacity(0.05)],
+                                            ? [
+                                                Colors.green.withOpacity(0.1),
+                                                Colors.green.withOpacity(0.05)
+                                              ]
+                                            : [
+                                                Colors.grey.withOpacity(0.1),
+                                                Colors.grey.withOpacity(0.05)
+                                              ],
                                       ),
-                                      borderRadius: BorderRadius.circular(10),
+                                      borderRadius:
+                                          BorderRadius.circular(10),
                                       border: Border.all(
-                                        color: _isOnline 
-                                          ? Colors.green.withOpacity(0.3)
-                                          : Colors.grey.withOpacity(0.3),
+                                        color: _isOnline
+                                            ? Colors.green.withOpacity(0.3)
+                                            : Colors.grey.withOpacity(0.3),
                                         width: 1,
                                       ),
                                     ),
@@ -395,16 +405,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Icon(
-                                          _isOnline ? Icons.cloud : Icons.cloud_off,
-                                          color: _isOnline ? Colors.green : Colors.grey,
+                                          _isOnline
+                                              ? Icons.cloud
+                                              : Icons.cloud_off,
+                                          color: _isOnline
+                                              ? Colors.green
+                                              : Colors.grey,
                                           size: 14,
                                         ),
                                         const SizedBox(width: 4),
                                         Text(
-                                          _getText(_isOnline ? 'online' : 'offline'),
+                                          _getText(_isOnline
+                                              ? 'online'
+                                              : 'offline'),
                                           style: TextStyle(
-                                            color: _isOnline ? Colors.green : Colors.grey,
-                                            fontSize: (10 * _fontSize).clamp(8.0, 12.0),
+                                            color: _isOnline
+                                                ? Colors.green
+                                                : Colors.grey,
+                                            fontSize: (10 * _fontSize)
+                                                .clamp(8.0, 12.0),
                                             fontWeight: FontWeight.w600,
                                           ),
                                         ),
@@ -412,9 +431,9 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     ),
                                   ),
                                 ),
-                                
+
                                 const SizedBox(width: 6),
-                                
+
                                 // Language Toggle Button (A)
                                 GestureDetector(
                                   onTap: _toggleLanguage,
@@ -427,16 +446,19 @@ class _DashboardScreenState extends State<DashboardScreen>
                                           kPrimaryColor.withOpacity(0.05),
                                         ],
                                       ),
-                                      borderRadius: BorderRadius.circular(10),
+                                      borderRadius:
+                                          BorderRadius.circular(10),
                                       border: Border.all(
-                                        color: kPrimaryColor.withOpacity(0.2),
+                                        color:
+                                            kPrimaryColor.withOpacity(0.2),
                                         width: 1,
                                       ),
                                     ),
                                     child: Text(
                                       _isEnglish ? 'తె' : 'A',
                                       style: TextStyle(
-                                        fontSize: (14 * _fontSize).clamp(12.0, 16.0),
+                                        fontSize: (14 * _fontSize)
+                                            .clamp(12.0, 16.0),
                                         fontWeight: FontWeight.bold,
                                         color: kPrimaryColor,
                                       ),
@@ -453,7 +475,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                 );
               },
             ),
-            
+
             // Main Content
             Expanded(
               child: AnimatedBuilder(
@@ -509,7 +531,8 @@ class _DashboardScreenState extends State<DashboardScreen>
                                     ),
                                   ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Row(
                                         children: [
@@ -517,26 +540,39 @@ class _DashboardScreenState extends State<DashboardScreen>
                                             padding: const EdgeInsets.all(12),
                                             decoration: BoxDecoration(
                                               gradient: LinearGradient(
-                                                colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.8)],
+                                                colors: [
+                                                  kPrimaryColor,
+                                                  kPrimaryColor
+                                                      .withOpacity(0.8)
+                                                ],
                                               ),
-                                              borderRadius: BorderRadius.circular(16),
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
                                               boxShadow: [
                                                 BoxShadow(
-                                                  color: kPrimaryColor.withOpacity(0.3),
-                                                  offset: const Offset(0, 8),
+                                                  color: kPrimaryColor
+                                                      .withOpacity(0.3),
+                                                  offset:
+                                                      const Offset(0, 8),
                                                   blurRadius: 16,
                                                 ),
                                               ],
                                             ),
                                             child: Container(
                                               decoration: BoxDecoration(
-                                                borderRadius: BorderRadius.circular(16),
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        16),
                                                 gradient: LinearGradient(
-                                                  begin: Alignment.topCenter,
-                                                  end: Alignment.bottomCenter,
+                                                  begin:
+                                                      Alignment.topCenter,
+                                                  end: Alignment
+                                                      .bottomCenter,
                                                   colors: [
-                                                    Colors.white.withOpacity(0.2),
-                                                    Colors.white.withOpacity(0.0),
+                                                    Colors.white
+                                                        .withOpacity(0.2),
+                                                    Colors.white
+                                                        .withOpacity(0.0),
                                                   ],
                                                 ),
                                               ),
@@ -550,21 +586,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                                           const SizedBox(width: 16),
                                           Expanded(
                                             child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
                                               children: [
                                                 Text(
                                                   _getText('welcome'),
                                                   style: TextStyle(
                                                     fontSize: 16 * _fontSize,
-                                                    color: Colors.grey.shade600,
-                                                    fontWeight: FontWeight.w500,
+                                                    color: Colors
+                                                        .grey.shade600,
+                                                    fontWeight:
+                                                        FontWeight.w500,
                                                   ),
                                                 ),
                                                 Text(
                                                   widget.userName,
                                                   style: TextStyle(
                                                     fontSize: 24 * _fontSize,
-                                                    fontWeight: FontWeight.bold,
+                                                    fontWeight:
+                                                        FontWeight.bold,
                                                     color: kPrimaryColor,
                                                   ),
                                                 ),
@@ -573,32 +613,36 @@ class _DashboardScreenState extends State<DashboardScreen>
                                           ),
                                         ],
                                       ),
-                                      
                                       const SizedBox(height: 20),
-                                      
                                       Container(
                                         padding: const EdgeInsets.all(20),
                                         decoration: BoxDecoration(
                                           gradient: LinearGradient(
                                             colors: [
-                                              kPrimaryColor.withOpacity(0.05),
-                                              kPrimaryColor.withOpacity(0.1),
+                                              kPrimaryColor
+                                                  .withOpacity(0.05),
+                                              kPrimaryColor
+                                                  .withOpacity(0.1),
                                             ],
                                           ),
-                                          borderRadius: BorderRadius.circular(16),
+                                          borderRadius:
+                                              BorderRadius.circular(16),
                                           border: Border.all(
-                                            color: kPrimaryColor.withOpacity(0.2),
+                                            color: kPrimaryColor
+                                                .withOpacity(0.2),
                                             width: 1,
                                           ),
                                         ),
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
                                             Text(
                                               _getText('question'),
                                               style: TextStyle(
                                                 fontSize: 18 * _fontSize,
-                                                fontWeight: FontWeight.w700,
+                                                fontWeight:
+                                                    FontWeight.w700,
                                                 color: Colors.black87,
                                               ),
                                             ),
@@ -607,8 +651,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                                               _getText('description'),
                                               style: TextStyle(
                                                 fontSize: 14 * _fontSize,
-                                                color: Colors.grey.shade600,
-                                                fontWeight: FontWeight.w500,
+                                                color:
+                                                    Colors.grey.shade600,
+                                                fontWeight:
+                                                    FontWeight.w500,
                                                 height: 1.4,
                                               ),
                                             ),
@@ -620,24 +666,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                                 ),
                               ),
                             ),
-                            
+
                             const SizedBox(height: 32),
-                            
+
                             // Category Grid
-                          CategoryGrid(
-                          selectedCategory: _selectedCategory,
-                          onCategorySelected: _onCategorySelected,
-                          isEnglish: _isEnglish, // Pass the language state here
-                        ),
+                            CategoryGrid(
+                              selectedCategory: _selectedCategory,
+                              onCategorySelected: _onCategorySelected,
+                              isEnglish: _isEnglish,
+                            ),
                             const SizedBox(height: 40),
-                            
+
                             // Recording Section
                             RecordingSection(
                               showOptions: _showOptions,
                               onToggleOptions: _toggleOptions,
                               selectedCategory: _selectedCategory,
+                              isEnglish: _isEnglish, // Pass language state
                             ),
-                            
+
                             const SizedBox(height: 32),
                           ],
                         ),

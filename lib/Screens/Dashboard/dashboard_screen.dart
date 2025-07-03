@@ -33,7 +33,7 @@ class _DashboardScreenState extends State<DashboardScreen>
   bool _isOnline = true;
   double _fontSize = 1.0;
   String? _selectedCategory;
-  bool _isEnglish = false; // Add language toggle state
+  bool _isEnglish = true; // Default to English
 
   // Language content map
   final Map<String, Map<String, String>> _languageContent = {
@@ -50,7 +50,7 @@ class _DashboardScreenState extends State<DashboardScreen>
 
     },
     'te': {
-      'title': 'తెలుగు భాష సంపర్కే',
+      'title': 'తెలుగు భాషా సంపర్క్',
       'welcome': 'మళ్లీ స్వాగతం,',
       'question': 'మీరు దేని గురించి మాట్లాడాలనుకుంటున్నారు?',
       'description': 'విషయ ఆలోచనలను పొందడానికి ఒక వర్గాన్ని ఎంచుకోండి, ఆపై మీ ఆలోచనలను పంచుకోవడానికి మీ ఇన్‌పుట్ పద్ధతిని ఎంచుకోండి.',
@@ -59,7 +59,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       'onlineMessage': 'మీరు ఇప్పుడు ఆన్‌లైన్‌లో ఉన్నారు',
       'offlineMessage': 'మీరు ఇప్పుడు ఆఫ్‌లైన్‌లో ఉన్నారు',
       'fontSize': 'ఫాంట్ పరిమాణం',
-  
     },
   };
 
@@ -81,7 +80,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       vsync: this,
     );
     
-    // FIXED: Initialize the animations properly
     _appBarAnimation = CurvedAnimation(
       parent: _appBarController,
       curve: Curves.easeOutCubic,
@@ -92,7 +90,6 @@ class _DashboardScreenState extends State<DashboardScreen>
       curve: Curves.easeOutCubic,
     );
     
-    // Start animations
     _appBarController.forward();
     Future.delayed(const Duration(milliseconds: 200), () {
       if (mounted) _contentController.forward();
@@ -162,7 +159,6 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // ignore: unused_element
   void _adjustFontSize() {
     setState(() {
       _fontSize = _fontSize >= 1.4 ? 1.0 : _fontSize + 0.2;
@@ -255,204 +251,8 @@ class _DashboardScreenState extends State<DashboardScreen>
       body: SafeArea(
         child: Column(
           children: [
-            // Fixed Top App Bar
-            AnimatedBuilder(
-              animation: _appBarAnimation,
-              builder: (context, child) {
-                return SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, -1),
-                    end: Offset.zero,
-                  ).animate(_appBarAnimation),
-                  child: FadeTransition(
-                    opacity: _appBarAnimation,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            Colors.white,
-                            Colors.grey.shade50,
-                          ],
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.08),
-                            offset: const Offset(0, 8),
-                            blurRadius: 20,
-                          ),
-                          BoxShadow(
-                            color: kPrimaryColor.withOpacity(0.1),
-                            offset: const Offset(0, 4),
-                            blurRadius: 10,
-                          ),
-                        ],
-                      ),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.white.withOpacity(0.9),
-                              Colors.white.withOpacity(0.7),
-                            ],
-                          ),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Row(
-                          children: [
-                            // Menu Button
-                            GestureDetector(
-                              onTap: () {
-                                _scaffoldKey.currentState?.openDrawer();
-                                HapticFeedback.lightImpact();
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      kPrimaryColor.withOpacity(0.1),
-                                      kPrimaryColor.withOpacity(0.05),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: kPrimaryColor.withOpacity(0.2),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: const Icon(
-                                  Icons.menu_rounded,
-                                  color: kPrimaryColor,
-                                  size: 20,
-                                ),
-                              ),
-                            ),
-                            
-                            const SizedBox(width: 8),
-                            
-                            // Title - Flexible to prevent overflow
-                            Expanded(
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [
-                                      kPrimaryColor.withOpacity(0.1),
-                                      kPrimaryColor.withOpacity(0.05),
-                                    ],
-                                  ),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: kPrimaryColor.withOpacity(0.2),
-                                    width: 1,
-                                  ),
-                                ),
-                                child: Text(
-                                  _getText('title'),
-                                  style: TextStyle(
-                                    fontSize: (14 * _fontSize).clamp(12.0, 16.0), // Clamp font size
-                                    fontWeight: FontWeight.bold,
-                                    color: kPrimaryColor,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
-                                ),
-                              ),
-                            ),
-                            
-                            const SizedBox(width: 8),
-                            
-                            // Control Buttons Row
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                // Online Status Button
-                                GestureDetector(
-                                  onTap: _toggleOnlineStatus,
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 300),
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: _isOnline
-                                          ? [Colors.green.withOpacity(0.1), Colors.green.withOpacity(0.05)]
-                                          : [Colors.grey.withOpacity(0.1), Colors.grey.withOpacity(0.05)],
-                                      ),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: _isOnline 
-                                          ? Colors.green.withOpacity(0.3)
-                                          : Colors.grey.withOpacity(0.3),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          _isOnline ? Icons.cloud : Icons.cloud_off,
-                                          color: _isOnline ? Colors.green : Colors.grey,
-                                          size: 14,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          _getText(_isOnline ? 'online' : 'offline'),
-                                          style: TextStyle(
-                                            color: _isOnline ? Colors.green : Colors.grey,
-                                            fontSize: (10 * _fontSize).clamp(8.0, 12.0),
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                
-                                const SizedBox(width: 6),
-                                
-                                // Language Toggle Button (A)
-                                GestureDetector(
-                                  onTap: _toggleLanguage,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          kPrimaryColor.withOpacity(0.1),
-                                          kPrimaryColor.withOpacity(0.05),
-                                        ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                        color: kPrimaryColor.withOpacity(0.2),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      _isEnglish ? 'తె' : 'A',
-                                      style: TextStyle(
-                                        fontSize: (14 * _fontSize).clamp(12.0, 16.0),
-                                        fontWeight: FontWeight.bold,
-                                        color: kPrimaryColor,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+            // Fixed Top App Bar with original UI
+            _buildAppBar(),
             
             // Main Content
             Expanded(
@@ -469,173 +269,25 @@ class _DashboardScreenState extends State<DashboardScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             // Welcome Section
-                            Container(
-                              width: double.infinity,
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    Colors.white,
-                                    Colors.grey.shade50,
-                                  ],
-                                ),
-                                borderRadius: BorderRadius.circular(24),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.08),
-                                    offset: const Offset(0, 20),
-                                    blurRadius: 40,
-                                  ),
-                                  BoxShadow(
-                                    color: kPrimaryColor.withOpacity(0.1),
-                                    offset: const Offset(0, 10),
-                                    blurRadius: 20,
-                                  ),
-                                ],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(24),
-                                child: Container(
-                                  padding: const EdgeInsets.all(28),
-                                  decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topCenter,
-                                      end: Alignment.bottomCenter,
-                                      colors: [
-                                        Colors.white.withOpacity(0.9),
-                                        Colors.white.withOpacity(0.7),
-                                      ],
-                                    ),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(12),
-                                            decoration: BoxDecoration(
-                                              gradient: LinearGradient(
-                                                colors: [kPrimaryColor, kPrimaryColor.withOpacity(0.8)],
-                                              ),
-                                              borderRadius: BorderRadius.circular(16),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: kPrimaryColor.withOpacity(0.3),
-                                                  offset: const Offset(0, 8),
-                                                  blurRadius: 16,
-                                                ),
-                                              ],
-                                            ),
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                borderRadius: BorderRadius.circular(16),
-                                                gradient: LinearGradient(
-                                                  begin: Alignment.topCenter,
-                                                  end: Alignment.bottomCenter,
-                                                  colors: [
-                                                    Colors.white.withOpacity(0.2),
-                                                    Colors.white.withOpacity(0.0),
-                                                  ],
-                                                ),
-                                              ),
-                                              child: const Icon(
-                                                Icons.waving_hand,
-                                                color: Colors.white,
-                                                size: 28,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(width: 16),
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  _getText('welcome'),
-                                                  style: TextStyle(
-                                                    fontSize: 16 * _fontSize,
-                                                    color: Colors.grey.shade600,
-                                                    fontWeight: FontWeight.w500,
-                                                  ),
-                                                ),
-                                                Text(
-                                                  widget.userName,
-                                                  style: TextStyle(
-                                                    fontSize: 24 * _fontSize,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: kPrimaryColor,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      
-                                      const SizedBox(height: 20),
-                                      
-                                      Container(
-                                        padding: const EdgeInsets.all(20),
-                                        decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [
-                                              kPrimaryColor.withOpacity(0.05),
-                                              kPrimaryColor.withOpacity(0.1),
-                                            ],
-                                          ),
-                                          borderRadius: BorderRadius.circular(16),
-                                          border: Border.all(
-                                            color: kPrimaryColor.withOpacity(0.2),
-                                            width: 1,
-                                          ),
-                                        ),
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              _getText('question'),
-                                              style: TextStyle(
-                                                fontSize: 18 * _fontSize,
-                                                fontWeight: FontWeight.w700,
-                                                color: Colors.black87,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              _getText('description'),
-                                              style: TextStyle(
-                                                fontSize: 14 * _fontSize,
-                                                color: Colors.grey.shade600,
-                                                fontWeight: FontWeight.w500,
-                                                height: 1.4,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
+                            _buildWelcomeCard(),
                             
                             const SizedBox(height: 32),
                             
                             // Category Grid
-                          CategoryGrid(
-                          selectedCategory: _selectedCategory,
-                          onCategorySelected: _onCategorySelected,
-                          isEnglish: _isEnglish, // Pass the language state here
-                        ),
+                            CategoryGrid(
+                              selectedCategory: _selectedCategory,
+                              onCategorySelected: _onCategorySelected,
+                              isEnglish: _isEnglish,
+                            ),
+                            
                             const SizedBox(height: 40),
                             
                             // Recording Section
                             RecordingSection(
+                              selectedCategory: _selectedCategory,
+                              isEnglish: _isEnglish, // Pass the language state
                               showOptions: _showOptions,
                               onToggleOptions: _toggleOptions,
-                              selectedCategory: _selectedCategory,
                             ),
                             
                             const SizedBox(height: 32),
@@ -649,6 +301,175 @@ class _DashboardScreenState extends State<DashboardScreen>
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAppBar() {
+    return AnimatedBuilder(
+      animation: _appBarAnimation,
+      builder: (context, child) {
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, -1),
+            end: Offset.zero,
+          ).animate(_appBarAnimation),
+          child: FadeTransition(
+            opacity: _appBarAnimation,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    offset: const Offset(0, 4),
+                    blurRadius: 10,
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  // Menu Button
+                  GestureDetector(
+                    onTap: () {
+                      _scaffoldKey.currentState?.openDrawer();
+                      HapticFeedback.lightImpact();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.menu_rounded, color: kPrimaryColor, size: 20),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Title
+                  Expanded(
+                    child: Text(
+                      _getText('title'),
+                      style: TextStyle(
+                        fontSize: (16 * _fontSize).clamp(14.0, 18.0),
+                        fontWeight: FontWeight.bold,
+                        color: kPrimaryColor,
+                      ),
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  // Control Buttons Row
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Online Status Button
+                      GestureDetector(
+                        onTap: _toggleOnlineStatus,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _isOnline ? Colors.green.shade50 : Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isOnline ? Icons.cloud_rounded : Icons.cloud_off_rounded,
+                                color: _isOnline ? Colors.green.shade700 : Colors.grey.shade600,
+                                size: 14,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _getText(_isOnline ? 'online' : 'offline'),
+                                style: TextStyle(
+                                  color: _isOnline ? Colors.green.shade800 : Colors.grey.shade700,
+                                  fontSize: (10 * _fontSize).clamp(8.0, 12.0),
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Language Toggle Button
+                      GestureDetector(
+                        onTap: _toggleLanguage,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            _isEnglish ? 'తె' : 'A',
+                            style: TextStyle(
+                              fontSize: (14 * _fontSize).clamp(12.0, 16.0),
+                              fontWeight: FontWeight.bold,
+                              color: kPrimaryColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildWelcomeCard() {
+     return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            offset: const Offset(0, 10),
+            blurRadius: 20,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${_getText('welcome')} ${widget.userName}',
+            style: TextStyle(
+              fontSize: 22 * _fontSize,
+              fontWeight: FontWeight.bold,
+              color: kPrimaryColor,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            _getText('question'),
+            style: TextStyle(
+              fontSize: 18 * _fontSize,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _getText('description'),
+            style: TextStyle(
+              fontSize: 14 * _fontSize,
+              color: Colors.grey.shade600,
+              height: 1.5,
+            ),
+          ),
+        ],
       ),
     );
   }
